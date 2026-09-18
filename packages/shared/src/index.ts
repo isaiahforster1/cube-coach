@@ -6,3 +6,4 @@
  * fast to test and safe to run in either process.
  */
 export * from './cube/index.js';
+export * from './scramble/index.js';

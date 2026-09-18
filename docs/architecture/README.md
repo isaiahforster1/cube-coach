@@ -29,8 +29,9 @@ reversal destroys the only thing this directory is for.
 
 ## Index
 
-| ADR                                                 | Title                                      | Status   |
-| --------------------------------------------------- | ------------------------------------------ | -------- |
-| [0001](0001-technology-stack.md)                    | Technology stack for the MVP               | Accepted |
-| [0002](0002-monorepo-with-shared-source-package.md) | Monorepo with a shared source package      | Accepted |
-| [0003](0003-cube-state-representation.md)           | Represent the cube as stickers, not pieces | Accepted |
+| ADR                                                 | Title                                                 | Status   |
+| --------------------------------------------------- | ----------------------------------------------------- | -------- |
+| [0001](0001-technology-stack.md)                    | Technology stack for the MVP                          | Accepted |
+| [0002](0002-monorepo-with-shared-source-package.md) | Monorepo with a shared source package                 | Accepted |
+| [0003](0003-cube-state-representation.md)           | Represent the cube as stickers, not pieces            | Accepted |
+| [0004](0004-scramble-generation.md)                 | Use cubing.js for scrambles, behind our own interface | Accepted |

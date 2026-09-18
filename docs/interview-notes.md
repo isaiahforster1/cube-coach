@@ -186,3 +186,83 @@ and rejecting those would just look like a bug.
 
 > "Case is not normalised because lowercase means something different in this notation.
 > Silently accepting it would produce a wrong result instead of an error."
+
+---
+
+## M2 — Scramble generation
+
+### Why not just generate random moves?
+
+Because it is biased. Stringing together random turns does not make every cube position
+equally likely — some come up far more often than others — and filtering out redundant
+moves does not fix it.
+
+The correct method is **random-state**: generate a uniformly random cube position, then
+_solve_ it, and use the solution as the scramble. That is what competitions require, and
+it needs a two-phase solver, which is weeks of work.
+
+We use cubing.js, the community-standard implementation, rather than writing one.
+
+> "Random-move scrambles are not uniformly distributed, so competition rules don't accept
+> them. Random-state requires a Kociemba solver, which is a solved problem — so I used the
+> established library and kept it behind our own interface."
+
+### Why wrap a library in your own interface instead of calling it directly?
+
+Because the dependency then touches exactly one file. If cubing.js is ever too heavy, or
+stops being maintained, or we want a fallback offline, the change is confined to one
+implementation of `ScrambleProvider` and nothing else in the codebase notices.
+
+This is worth doing when a dependency is _replaceable and consequential_. It is not worth
+doing for every library — wrapping something like a date formatter is just extra code.
+
+> "The library sits behind a provider interface, so swapping it touches one file. I only
+> do that where the dependency is both replaceable and important enough to matter."
+
+### Why does `Scramble` carry a `quality` field?
+
+Because the two generators are not equivalent, and hiding that would be dishonest to
+someone practising seriously. A value of `'random-move'` means "this is a fallback" and the
+UI can say so. Silently downgrading quality is the kind of thing that erodes trust in a
+tool precisely when it matters.
+
+### Why a dynamic `import()` instead of a normal import?
+
+A normal import is loaded when the file is loaded. A dynamic one is fetched only when the
+line actually runs.
+
+cubing.js carries a WebAssembly solver, and the timer should be usable immediately. So the
+solver is fetched at the moment a scramble is first requested, not while the page is still
+loading. It also keeps the library out of test runs that never touch it.
+
+> "Dynamic import defers loading the WASM solver until a scramble is actually needed, so it
+> isn't in the initial bundle."
+
+### Why parse the library's output with our own parser?
+
+Trust boundary. If cubing.js ever emits notation this engine does not implement — a wide
+turn, a rotation — parsing throws immediately. Without that check, the cube state would
+quietly stop matching the scramble shown on screen, which is close to undebuggable from a
+user report.
+
+### Why is the random source injected instead of calling `Math.random`?
+
+So tests can pass in a seeded generator and assert exact output. A test that depends on
+real randomness either cannot assert anything specific, or fails one run in fifty — which
+is worse than having no test.
+
+Treating randomness as an input rather than a hidden dependency is the same idea as
+injecting a clock instead of calling `Date.now()` inside a function. It is one of the most
+reliably useful testability patterns there is.
+
+> "Randomness is injected, so tests are deterministic. Same reasoning as injecting a clock
+> rather than calling Date.now inside the function you're testing."
+
+### Why test against the real library instead of mocking it?
+
+The only thing worth verifying at that seam is whether _their_ output works with _our_
+parser. A mock would return whatever we told it to, proving only that our assumptions agree
+with themselves.
+
+General rule: mock things that are slow, flaky, or have side effects you cannot afford.
+Do not mock the thing whose real behaviour is the point of the test.

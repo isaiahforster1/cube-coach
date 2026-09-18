@@ -7,14 +7,14 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M1 complete** — the cube engine works and is tested. There is no user interface yet.
+Early development. **M2 complete** — cube engine and scramble generation work and are tested. There is no user interface yet.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
 | M0        | Repo foundation: workspace, TypeScript, lint, CI, docs | ✅ Done |
 | M1        | Cube engine: state, moves, notation                    | ✅ Done |
-| M2        | Scramble generation                                    | Next    |
-| M3        | API skeleton and database                              |         |
+| M2        | Scramble generation                                    | ✅ Done |
+| M3        | API skeleton and database                              | Next    |
 | M4        | Authentication                                         |         |
 | M5        | Web shell                                              |         |
 | M6        | Timer                                                  |         |
