@@ -2,6 +2,18 @@ import type { Penalty as DbPenalty, PrismaClient } from '@prisma/client';
 
 export function createSolvesRepository(prisma: PrismaClient) {
   return {
+    /** Every counting solve, oldest first, which is the order the averages need. */
+    listAllForStats(userId: string, practiceSessionId?: string) {
+      return prisma.solve.findMany({
+        where: {
+          userId,
+          deletedAt: null,
+          ...(practiceSessionId === undefined ? {} : { practiceSessionId }),
+        },
+        orderBy: [{ solvedAt: 'asc' }, { id: 'asc' }],
+      });
+    },
+
     /**
      * Insert a solve, or return the existing one if this id has already been stored.
      *

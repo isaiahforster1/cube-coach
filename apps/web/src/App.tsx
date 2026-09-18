@@ -4,6 +4,7 @@ import { LoginPage } from './features/auth/LoginPage.js';
 import { ProtectedRoute } from './features/auth/ProtectedRoute.js';
 import { RegisterPage } from './features/auth/RegisterPage.js';
 import { HistoryPage } from './features/history/HistoryPage.js';
+import { StatsPage } from './features/stats/StatsPage.js';
 import { TimerPage } from './features/timer/TimerPage.js';
 
 export function App(): ReactElement {
@@ -16,6 +17,7 @@ export function App(): ReactElement {
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<TimerPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/stats" element={<StatsPage />} />
       </Route>
 
       <Route

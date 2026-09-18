@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M8 complete** — timer, saved solves, and a paginated history you can edit.
+Early development. **M9 complete** — timer, history, and statistics that measure consistency and scramble difficulty, not just speed.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -20,8 +20,8 @@ Early development. **M8 complete** — timer, saved solves, and a paginated hist
 | M6        | Timer                                                  | ✅ Done |
 | M7        | Solve and session persistence                          | ✅ Done |
 | M8        | History                                                | ✅ Done |
-| M9        | Statistics and personal records                        | Next    |
-| M10       | Interactive cube                                       |         |
+| M9        | Statistics and personal records                        | ✅ Done |
+| M10       | Interactive cube                                       | Next    |
 | M11       | Algorithm library                                      |         |
 | M12       | Hardening and deployment                               |         |
 

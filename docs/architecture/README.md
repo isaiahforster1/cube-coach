@@ -40,3 +40,4 @@ reversal destroys the only thing this directory is for.
 | [0007](0007-versioned-api-path.md)                      | Version the API in the URL, with health checks outside it | Accepted |
 | [0008](0008-timer-as-a-pure-state-machine.md)           | The timer is a pure state machine in the shared package   | Accepted |
 | [0009](0009-never-lose-a-solve.md)                      | Never lose a solve                                        | Accepted |
+| [0010](0010-statistics-built-for-diagnosis.md)          | Statistics are built for diagnosis, not just reporting    | Accepted |

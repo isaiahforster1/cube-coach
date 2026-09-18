@@ -76,7 +76,11 @@ export function useSolveSync() {
     } finally {
       setPendingCount(readPendingSolves().length);
       setIsSyncing(false);
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     }
   }, [queryClient]);
 
@@ -112,7 +116,11 @@ export function useSaveSolve() {
       return response.solve;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     },
     // The request is idempotent by design, so retrying cannot duplicate a solve.
     retry: 2,
@@ -132,7 +140,11 @@ export function useUpdateSolvePenalty() {
       return solve;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     },
   });
 }

@@ -1118,3 +1118,115 @@ Fastify believed the header, tried to parse nothing as JSON, and rejected the re
 
 The fix: only set the content type when there is actually a body to describe. A header is
 a claim about the payload, and claiming JSON with nothing attached is simply false.
+
+---
+
+## M9 — Statistics and analysis
+
+### How does an average of five actually work?
+
+Drop the fastest and the slowest, mean the middle three. That is the WCA rule, and it
+exists so a single lucky or disastrous solve cannot define the result.
+
+The part people get wrong is the DNF. It is not skipped and it is not zero — it ranks as
+**worse than any time**. So one DNF in an average of five is trimmed away as the worst
+solve and the average still counts. A second one survives the trim, and because it has no
+duration the whole average becomes a DNF.
+
+In the code that falls out naturally: DNFs sort last, the same number is trimmed from each
+end regardless, and any DNF still standing afterwards makes the result a DNF.
+
+> "Trim the best and worst, mean the rest. A DNF sorts as worse than any time, so one gets
+> trimmed and the average survives — two don't, and the average is a DNF."
+
+### Why is a "best average" not just the five fastest solves?
+
+Because it has to be five **consecutive** solves. That is what makes it meaningful: it
+measures sustained performance rather than a lucky scatter across a whole session.
+
+The implementation slides a window across the history and keeps the best valid one. There
+is a test with fast solves deliberately interleaved with slow ones, asserting the result
+is worse than the average of the five fastest — which it must be.
+
+### Why does an average return three cases instead of a number or null?
+
+Because "did not finish" and "not enough solves yet" are different facts and must render
+differently: `DNF` versus `—`. Collapsing both into null loses the distinction, and a
+sentinel number invites the value into arithmetic where it does not belong.
+
+A discriminated union forces every caller to handle all three. There is a UI test
+asserting the screen shows a dash, not `0.00`, for an average that is not possible yet —
+a zero reads as an impossibly fast solve.
+
+### Why measure spread as well as average?
+
+Because two cubers with the same average can need opposite advice.
+
+Someone whose solves are all within a second of each other is limited by technique — they
+need better methods. Someone alternating between very fast and very slow is limited by
+mistakes — they need to stop making them. The average is identical; only the spread tells
+them apart.
+
+Deviation is also reported relative to the mean, because two seconds of variation is a
+catastrophe at a ten-second average and unremarkable at sixty.
+
+### Why population standard deviation rather than the sample formula?
+
+Dividing by n−1 corrects for the fact that a sample underestimates the spread of the
+population it came from. These solves are not a sample — they are the entire history,
+every solve there is. There is no wider population being estimated, so the correction
+would be adjusting for sampling that never happened.
+
+### How is cross difficulty computed, and why exactly rather than estimated?
+
+A cross is four edges, which is only 190,080 possible arrangements — small enough to solve
+completely rather than approximate.
+
+A breadth-first search runs outward from the solved cross once, recording the distance to
+every arrangement. Because every move has an inverse, distance is symmetric: the distance
+from a scramble to solved equals the distance from solved to that scramble. So one search
+answers every future question by lookup — about 90ms to build a table, then 0.01ms per
+query.
+
+The alternative was a heuristic like "count how many cross edges are already placed",
+which is cheap and unreliable in exactly the cases that matter. The search is fast enough
+that approximating would trade correctness for nothing.
+
+> "The cross is four pieces, so the whole state space fits in a table. I BFS out from
+> solved once and look up the answer, rather than searching per scramble — the graph is
+> undirected, so distances are symmetric."
+
+### Why derive the edge move tables instead of writing them?
+
+Because hand-entered tables were already wrong once, in M1, in a way that passed every
+structural test.
+
+Applying each move to a solved cube and observing where the pieces went derives the edge
+behaviour from the facelet engine, which is already verified two independent ways. Nothing
+new to get wrong, and it inherits the existing confidence rather than needing its own.
+
+### What makes this different from what other timers do?
+
+Every timer records a scramble and a time. Almost none _use_ the scramble — it is an
+opaque string to display.
+
+Because the scramble is stored and the engine can solve the cross exactly, we can compare
+someone's times on objectively easy scrambles against objectively hard ones. That produces
+a statement no other timer can make: _"you average 12.0 when the cross takes five moves or
+fewer and 16.5 when it takes more"_ — which is specific, checkable, and leads straight to
+a drill.
+
+It also sets the AI work up correctly: the deterministic code finds the pattern, and the
+model explains it. An AI given a list of times can only guess confidently.
+
+### Why refuse to show the insight below eight solves per group?
+
+Because with a handful of solves the difference between the groups is noise, and
+presenting noise as a finding is worse than saying nothing. A cuber who changes their
+practice because of a fluke has been actively harmed by the tool.
+
+The screen says what it is measuring and admits it does not know yet. Being honest about
+uncertainty is cheap; being confidently wrong is not.
+
+> "Below a minimum sample I return null and the UI says so. A statistics product that
+> reports noise as insight is worse than one that reports nothing."

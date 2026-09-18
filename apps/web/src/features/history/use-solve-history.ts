@@ -42,7 +42,11 @@ export function useDeleteSolve() {
   return useMutation({
     mutationFn: (id: string) => api.delete<void>(`/solves/${id}`),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     },
   });
 }
@@ -53,7 +57,11 @@ export function useRestoreSolve() {
   return useMutation({
     mutationFn: (id: string) => api.post<{ solve: Solve }>(`/solves/${id}/restore`),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     },
   });
 }
@@ -65,7 +73,11 @@ export function useSetSolvePenalty() {
     mutationFn: ({ id, penalty }: { id: string; penalty: Penalty }) =>
       api.patch<{ solve: Solve }>(`/solves/${id}`, { penalty }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: SOLVES_KEY });
+      // Statistics are derived from solves, so they are stale the moment one changes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SOLVES_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['stats'] }),
+      ]);
     },
   });
 }

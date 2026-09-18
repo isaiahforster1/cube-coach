@@ -21,6 +21,7 @@ export function AppLayout({ children }: { children: ReactNode }): ReactElement {
           <nav aria-label="Main" className="flex gap-4 text-sm">
             <NavItem to="/">Timer</NavItem>
             <NavItem to="/history">History</NavItem>
+            <NavItem to="/stats">Stats</NavItem>
           </nav>
         </div>
 

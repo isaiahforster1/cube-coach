@@ -14,6 +14,8 @@ import { createPracticeSessionsService } from './modules/practice-sessions/pract
 import { createSolvesRepository } from './modules/solves/solves.repository.js';
 import { registerSolveRoutes } from './modules/solves/solves.routes.js';
 import { createSolvesService } from './modules/solves/solves.service.js';
+import { registerStatsRoutes } from './modules/stats/stats.routes.js';
+import { createStatsService } from './modules/stats/stats.service.js';
 import { registerAuthentication } from './plugins/authenticate.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
 
@@ -98,10 +100,9 @@ export async function buildApp({
 
   const practiceSessionsRepository = createPracticeSessionsRepository(prisma);
   const practiceSessionsService = createPracticeSessionsService(practiceSessionsRepository);
-  const solvesService = createSolvesService(
-    createSolvesRepository(prisma),
-    practiceSessionsRepository,
-  );
+  const solvesRepository = createSolvesRepository(prisma);
+  const statsService = createStatsService(solvesRepository);
+  const solvesService = createSolvesService(solvesRepository, practiceSessionsRepository);
 
   registerErrorHandler(app, config.NODE_ENV === 'production');
   registerAuthentication(app, authService);
@@ -118,6 +119,7 @@ export async function buildApp({
       registerAuthRoutes(instance, authService, limits?.credentialMax ?? 10);
       registerPracticeSessionRoutes(instance, practiceSessionsService);
       registerSolveRoutes(instance, solvesService);
+      registerStatsRoutes(instance, statsService);
     },
     { prefix: '/api/v1' },
   );
