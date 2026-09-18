@@ -7,15 +7,15 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M2 complete** — cube engine and scramble generation work and are tested. There is no user interface yet.
+Early development. **M3 complete** — cube engine, scrambles, and an API with a migrated database. There is no user interface yet.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
 | M0        | Repo foundation: workspace, TypeScript, lint, CI, docs | ✅ Done |
 | M1        | Cube engine: state, moves, notation                    | ✅ Done |
 | M2        | Scramble generation                                    | ✅ Done |
-| M3        | API skeleton and database                              | Next    |
-| M4        | Authentication                                         |         |
+| M3        | API skeleton and database                              | ✅ Done |
+| M4        | Authentication                                         | Next    |
 | M5        | Web shell                                              |         |
 | M6        | Timer                                                  |         |
 | M7        | Solve and session persistence                          |         |
@@ -47,6 +47,8 @@ docs/            Documentation and ADRs
 ## Documentation
 
 - [Development setup](docs/development.md)
+- [Database design](docs/database.md) — schema, indexes, and why solves are stored the way they are
+- [Testing](docs/testing.md) — what is tested where, and what is deliberately not mocked
 - [Architecture decisions](docs/architecture/) — why the stack and structure are what they are
 - [Interview notes](docs/interview-notes.md) — what this project teaches, milestone by milestone
 

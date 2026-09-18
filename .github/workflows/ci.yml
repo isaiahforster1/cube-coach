@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel superseded runs on the same branch instead of paying for both.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -15,6 +14,29 @@ jobs:
   check:
     name: Format, lint, typecheck, test
     runs-on: ubuntu-latest
+
+    # The API's integration tests run against a real PostgreSQL, not a mock, so CI
+    # needs one. These credentials are for a throwaway container that exists only for
+    # the length of the job and is never reachable from outside it — they are not a
+    # secret, and must never be reused anywhere real.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: cubecoach
+          POSTGRES_PASSWORD: local_development_only
+          POSTGRES_DB: cubecoach
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U cubecoach -d cubecoach"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://cubecoach:local_development_only@localhost:5433/cubecoach?schema=public
+      TEST_DATABASE_URL: postgresql://cubecoach:local_development_only@localhost:5433/cubecoach_test?schema=public
 
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +54,11 @@ jobs:
       # so CI can never silently install versions that differ from local.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Prisma generates a typed client from the schema. Nothing in the API
+      # typechecks without it, so this has to happen before the gates below.
+      - name: Generate Prisma client
+        run: pnpm --filter @cube-coach/api run db:generate
 
       # Deliberately separate steps: GitHub shows which gate failed at a glance.
       - name: Check formatting

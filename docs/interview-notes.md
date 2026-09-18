@@ -266,3 +266,150 @@ with themselves.
 
 General rule: mock things that are slow, flaky, or have side effects you cannot afford.
 Do not mock the thing whose real behaviour is the point of the test.
+
+---
+
+## M3 — API skeleton and database
+
+### Why is the app created by a function instead of just existing?
+
+`buildApp()` returns a new Fastify instance, given a config and a database client. The
+alternative is a module that creates one app when imported and exports it.
+
+The factory is what makes the API testable. A test builds its own app pointing at the
+test database, and nothing has to reach into global state to swap anything out. With a
+singleton, every test shares one instance configured from whatever environment variables
+happened to be set.
+
+This is dependency injection, without a framework doing it for you: things a component
+needs are handed to it rather than fetched by it.
+
+> "buildApp is a factory taking config and a database client, so tests construct their
+> own instance against a test database instead of mutating global state."
+
+### What is `app.inject()`?
+
+Fastify can process a request object directly, without a network. `inject()` runs the
+entire stack — routing, body parsing, validation, error handling — and returns the
+response, with no port opened and no HTTP involved.
+
+So integration tests are nearly as fast as unit tests but genuinely exercise the whole
+request path. This is why the API tests take seconds rather than minutes.
+
+### Why validate environment variables at startup?
+
+Because `process.env.DATABASE_URL` is `string | undefined` everywhere, and a typo
+surfaces as a confusing failure on whichever request first needed it, possibly hours
+into production.
+
+Parsing the whole environment through a Zod schema at boot means a missing variable
+crashes immediately with a message naming it, and the rest of the codebase gets a typed
+object with no undefined-checking.
+
+> "Fail fast at startup with a clear message, instead of failing later in a confusing
+> place. It also gives the rest of the code real types instead of string-or-undefined."
+
+### What is the difference between liveness and readiness?
+
+`/health` asks "is this process running?" and touches nothing external. `/health/ready`
+asks "can it serve traffic?" and checks the database.
+
+They mean different things to a deployment platform. A failed liveness check means
+restart the process. A failed readiness check means stop sending it traffic but leave it
+alone — restarting would not fix a database that is down.
+
+Conflating them causes a classic outage: a brief database blip fails the health check,
+the platform restarts every instance, and the restarts make everything worse.
+
+> "Liveness means restart me, readiness means don't route to me yet. Checking the
+> database in the liveness probe turns a brief database blip into a restart loop."
+
+### Why one error shape for the whole API?
+
+Every error returns `{ error: { code, message, details? } }`. `code` is a stable
+machine-readable string; `message` is for humans and can be reworded any time.
+
+Clients branch on `code`, never on message text. Without that rule, someone eventually
+writes `if (error.message === 'Not found')`, and it breaks the day someone improves the
+wording.
+
+### Why hide error details in production but not in development?
+
+A stack trace or a raw driver error leaks table names, file paths, library versions, and
+sometimes connection strings. That is genuinely useful to an attacker mapping out a
+system.
+
+In development you want all of it. The handler branches on `NODE_ENV`, and there is a
+test asserting that a connection string does not appear in a production response —
+because this is the kind of thing that is easy to regress and invisible when it does.
+
+### Why test against a real database instead of mocking it?
+
+A mock returns whatever you told it to. It cannot catch a `WHERE` clause on the wrong
+column, a missing unique constraint, a cascade that does not fire, or a migration that
+was never applied. Those are the bugs that reach production.
+
+The API tests run against real PostgreSQL in Docker, on a separate `cubecoach_test`
+database that is truncated between tests.
+
+The usual objection is speed. The whole API suite takes about 2.5 seconds, and the pure
+logic in `packages/shared` is tested separately in milliseconds. That trade is easy.
+
+> "Mocking the database tests the mock. The bugs worth catching are in the queries and
+> constraints, which a mock cannot see. The suite runs against real Postgres in Docker
+> and takes about two seconds."
+
+### Why not SQLite in memory for tests?
+
+It is the usual suggestion, and it is a _different database_: different types, different
+constraint behaviour, no `timestamptz`, different concurrency. Tests would pass against
+something production does not use — precisely the failure mode running a real database
+is meant to prevent.
+
+### Why is `migrate deploy` used in tests rather than `migrate dev`?
+
+`dev` generates new migrations from schema changes. `deploy` only applies migrations that
+already exist and never generates anything.
+
+`deploy` is what CI and production run, so using it in tests means the suite exercises
+the same migration path a real deployment will, rather than a developer-only shortcut.
+
+### Why are penalties stored separately from the solve time?
+
+Because they get corrected after the fact. If a `+2` were added into the stored number,
+changing the penalty later would mean subtracting it again, and every toggle is a chance
+to drift.
+
+Storing the raw time as immutable and deriving the effective time on read makes the
+correction a single field update that cannot corrupt anything.
+
+> "The raw measurement is immutable and the penalty is a separate field, so correcting a
+> penalty can't corrupt the underlying time."
+
+### Why integer milliseconds instead of seconds as a decimal?
+
+`14.32` cannot be represented exactly in binary floating point. Times get compared for
+personal bests and summed for averages, and floating-point error in either produces
+wrong results that are painful to reproduce. Whole milliseconds as an integer are exact.
+
+Same reasoning as storing money in cents.
+
+### Why does the client generate the solve ID?
+
+So that creating a solve is idempotent. If the network drops after the server commits but
+before the response arrives, the client retries with the same id and the server
+recognises it as the same solve rather than inserting a second one.
+
+For a timer, losing or duplicating a solve is the worst possible failure, and this
+removes a whole class of it by construction rather than by careful handling.
+
+### Why not store personal records in their own table?
+
+They would have to be invalidated on every insert, delete _and_ penalty change, and a
+stale personal best is both wrong and very confusing.
+
+Computed on read from an indexed query, at realistic volumes, is fast enough. Denormalise
+when profiling says to, not in advance.
+
+> "It's a cache, and caches need invalidating. Three different operations can change a
+> personal best, so I compute it on read until measurements say otherwise."

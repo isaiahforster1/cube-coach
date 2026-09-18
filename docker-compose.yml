@@ -1,0 +1,26 @@
+# Local development services. Not used in production — see docs/architecture/0001.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cube-coach-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cubecoach
+      POSTGRES_PASSWORD: local_development_only
+      POSTGRES_DB: cubecoach
+    ports:
+      # 5433 on the host, so this cannot collide with a Postgres already
+      # installed locally on the default 5432.
+      - '5433:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Compose waits for this before reporting the service healthy, so scripts
+      # and CI do not race a database that is still starting up.
+      test: ['CMD-SHELL', 'pg_isready -U cubecoach -d cubecoach']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
