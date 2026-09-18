@@ -8,3 +8,4 @@
 export * from './cube/index.js';
 export * from './scramble/index.js';
 export * from './contracts/index.js';
+export * from './timer/index.js';

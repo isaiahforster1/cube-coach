@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M5 complete** — you can register, sign in, and see a generated scramble. The timer is next.
+Early development. **M6 complete** — a working timer with inspection and penalties. Solves are not yet saved.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -17,8 +17,8 @@ Early development. **M5 complete** — you can register, sign in, and see a gene
 | M3        | API skeleton and database                              | ✅ Done |
 | M4        | Authentication                                         | ✅ Done |
 | M5        | Web shell                                              | ✅ Done |
-| M6        | Timer                                                  | Next    |
-| M7        | Solve and session persistence                          |         |
+| M6        | Timer                                                  | ✅ Done |
+| M7        | Solve and session persistence                          | Next    |
 | M8        | History                                                |         |
 | M9        | Statistics and personal records                        |         |
 | M10       | Interactive cube                                       |         |

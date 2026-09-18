@@ -3,7 +3,7 @@ import { Route, Routes } from 'react-router';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { ProtectedRoute } from './features/auth/ProtectedRoute.js';
 import { RegisterPage } from './features/auth/RegisterPage.js';
-import { HomePage } from './pages/HomePage.js';
+import { TimerPage } from './features/timer/TimerPage.js';
 
 export function App(): ReactElement {
   return (
@@ -13,7 +13,7 @@ export function App(): ReactElement {
 
       {/* Everything nested here requires a signed-in user. */}
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<TimerPage />} />
       </Route>
 
       <Route

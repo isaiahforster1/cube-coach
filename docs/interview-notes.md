@@ -753,3 +753,149 @@ the application is on.
 > "Versioning is what lets a breaking change ship as v2 while old clients keep working. I
 > added the prefix before any client hardcoded a path, because retrofitting it is the
 > coordinated change you're trying to avoid."
+
+---
+
+## M6 — Timer
+
+### Why is the timer a state machine instead of a few booleans?
+
+Because a timer has strict rules about what may follow what, and booleans cannot express
+them. With `isRunning`, `isHolding`, `isReady` as separate flags, nothing stops two being
+true at once — and that is exactly how a timer ends up able to start while already
+running, or to record a solve that never began.
+
+A machine has one `phase` at a time and an explicit list of legal transitions. A
+transition that is not written down cannot happen.
+
+> "Six states with explicit transitions, rather than independent booleans that can
+> contradict each other. Illegal states become unrepresentable instead of merely
+> unlikely."
+
+### Why does the reducer take the time as an argument instead of reading the clock?
+
+Because a function that calls `performance.now()` inside itself can never be tested
+without waiting for real time to pass.
+
+Every event carries its timestamp — `{ type: 'pressDown', at: 14302 }` — so the reducer
+is a pure function. Thirty tests drive complete solves, including a 17-second inspection
+overrun, in microseconds. No fake timers, no `setTimeout` in tests, no flakiness.
+
+This is the same idea as injecting the random source into the scramble generator. Time
+and randomness are inputs, not ambient facts.
+
+> "The clock is a parameter, so the reducer is pure. I can test a seventeen-second
+> inspection penalty without waiting seventeen seconds, and the test can't be flaky
+> because there's no real time involved."
+
+### Why `performance.now()` rather than `Date.now()`?
+
+`Date.now` follows the system clock, which can jump — NTP correcting drift, the user
+changing timezone, daylight saving. A solve timed across a backwards jump would record a
+negative duration.
+
+`performance.now` is **monotonic**: it only ever moves forward, and it is
+higher-resolution. For measuring an interval it is always the right choice.
+
+> "Date.now can jump backwards when the system clock is corrected. performance.now is
+> monotonic, so an interval measured with it can't go negative."
+
+### Why is arming the timer a `setTimeout` and the display a `requestAnimationFrame`?
+
+They are different jobs and they fail differently.
+
+`requestAnimationFrame` runs before the next repaint, which makes it right for a number
+that changes sixty times a second. But browsers throttle it hard — background tabs,
+battery saver, an unfocused window. I measured **two frames in one second** in a
+throttled tab.
+
+Originally the hold-to-ready transition was driven by that same loop, so in a throttled
+tab the timer could not arm at all. Becoming ready is a state change that must happen
+after a fixed duration whether or not anything is being painted, so it got its own
+timeout.
+
+The display can freeze harmlessly, because the measured time comes from timestamps taken
+at start and stop — not from counting frames.
+
+> "rAF is for painting and gets throttled. A state change on a fixed delay belongs on a
+> timeout. The measurement itself is two timestamps, so a frozen display doesn't affect
+> accuracy."
+
+### What is `event.repeat` and why does it matter?
+
+Holding a key down makes the browser fire `keydown` repeatedly — the same thing that
+types `aaaaaa` when you hold a letter. `event.repeat` is `true` for every firing after
+the first.
+
+The timer requires holding space for 550ms before it arms. If each repeat were treated as
+a new press, the hold would restart constantly and the timer would never become ready —
+it would simply appear broken.
+
+### Why does the spacebar need `preventDefault`?
+
+Space scrolls the page. On a timer that means every start and stop jumps the view.
+
+### Why ignore the key-up that stopped the timer?
+
+Because the same physical press produces `keydown` (which stops the timer) and then
+`keyup`. If that `keyup` were treated as "release from ready", the timer would start a
+new solve the instant you stopped the last one.
+
+### What happens if the window loses focus mid-hold?
+
+The `keyup` never arrives, so without handling it the timer stays stuck in `holding`
+forever, waiting for a release that will never come.
+
+A `blur` listener cancels anything in progress — but deliberately only if the solve has
+not yet started. Alt-tabbing during a solve must not throw away the solve.
+
+### Why is a DNF `null` rather than `Infinity` or `-1`?
+
+Because a DNF is not a duration. It is the absence of one.
+
+Encoding it as a number invites it to be averaged, summed or compared by accident, and
+the result looks plausible rather than obviously wrong. `null` forces every caller to
+decide what a DNF means in their context — which matters enormously in M9, where a DNF
+counts as the worst time in an average of five, and two DNFs make the whole average a
+DNF.
+
+> "A DNF isn't a number, so I don't store it as one. Infinity or -1 would silently
+> survive an average; null makes the caller handle it."
+
+### Why is the displayed time truncated rather than rounded?
+
+Competition convention: 12.999 displays as 12.99, never 13.00.
+
+Rounding up would occasionally show someone a personal best they did not actually
+achieve, which is precisely the kind of small dishonesty that destroys trust in a timing
+tool.
+
+### Why is the ticking number not inside an `aria-live` region?
+
+Because a live region is announced when it changes, and this one changes sixty times a
+second. A screen reader would talk continuously and the app would be unusable.
+
+Instead the number is `aria-hidden`, and a separate visually-hidden region announces the
+final result once, when the solve stops. The information reaches the user — just once,
+at the moment it is meaningful.
+
+> "Live regions announce on change. A number updating every frame would be a wall of
+> speech, so the display is aria-hidden and the result is announced once when it's
+> final."
+
+### What bug did using the app find that the tests did not?
+
+After a solve, the timer sat in `stopped` and the spacebar did nothing — starting the
+next solve required clicking a button. For someone holding a cube in both hands, that
+means putting it down and reaching for the mouse between every single solve.
+
+The unit tests passed, because they encoded the same wrong assumption I had written into
+the machine. There was even a test named "does not stop twice" asserting the broken
+behaviour was correct.
+
+The lesson is not that the tests were bad. It is that tests verify the behaviour you
+specified, and they cannot tell you the specification was wrong. Thirty seconds of
+actually using the thing did.
+
+> "Tests check the code against your intent. They can't check your intent. That one
+> needed a human pressing the spacebar twice."

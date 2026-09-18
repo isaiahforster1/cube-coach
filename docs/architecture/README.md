@@ -38,3 +38,4 @@ reversal destroys the only thing this directory is for.
 | [0005](0005-integration-tests-against-real-database.md) | Integration tests run against a real database             | Accepted |
 | [0006](0006-session-cookies-not-jwt.md)                 | Database-backed session cookies, not JWTs                 | Accepted |
 | [0007](0007-versioned-api-path.md)                      | Version the API in the URL, with health checks outside it | Accepted |
+| [0008](0008-timer-as-a-pure-state-machine.md)           | The timer is a pure state machine in the shared package   | Accepted |
