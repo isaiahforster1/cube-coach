@@ -7,13 +7,13 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M0 complete** — repository foundation only. There is no application yet.
+Early development. **M1 complete** — the cube engine works and is tested. There is no user interface yet.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
 | M0        | Repo foundation: workspace, TypeScript, lint, CI, docs | ✅ Done |
-| M1        | Cube engine: state, moves, notation                    | Next    |
-| M2        | Scramble generation                                    |         |
+| M1        | Cube engine: state, moves, notation                    | ✅ Done |
+| M2        | Scramble generation                                    | Next    |
 | M3        | API skeleton and database                              |         |
 | M4        | Authentication                                         |         |
 | M5        | Web shell                                              |         |
