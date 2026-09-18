@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
   createRandomStateScrambleProvider,
   DEFAULT_TIMER_CONFIG,
@@ -7,6 +7,12 @@ import {
   type Scramble,
 } from '@cube-coach/shared';
 import { useLogout, useSession } from '../auth/use-session.js';
+import {
+  useCurrentPracticeSession,
+  useSaveSolve,
+  useSolveSync,
+  useUpdateSolvePenalty,
+} from '../solves/use-solves.js';
 import { TimerDisplay } from './TimerDisplay.js';
 import { useTimer, type SolveResult } from './use-timer.js';
 
@@ -16,9 +22,14 @@ export function TimerPage(): ReactElement {
   const { data: user } = useSession();
   const logout = useLogout();
 
+  const { practiceSessionId } = useCurrentPracticeSession();
+  const saveSolve = useSaveSolve();
+  const updatePenalty = useUpdateSolvePenalty();
+  const { pendingCount, isSyncing } = useSolveSync();
+
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
   const [scramble, setScramble] = useState<Scramble | null>(null);
-  const [lastSolve, setLastSolve] = useState<SolveResult | null>(null);
+  const [lastSolve, setLastSolve] = useState<(SolveResult & { id: string }) | null>(null);
 
   const loadScramble = useCallback(() => {
     let cancelled = false;
@@ -32,28 +43,41 @@ export function TimerPage(): ReactElement {
 
   useEffect(() => loadScramble(), [loadScramble]);
 
+  const handleSolveComplete = useCallback(
+    (result: SolveResult) => {
+      const id = crypto.randomUUID();
+      setLastSolve({ ...result, id });
+
+      // The scramble is captured as it was when the solve started, not read later —
+      // the next one is already being fetched by the time this runs.
+      if (practiceSessionId !== undefined && scramble !== null) {
+        saveSolve.mutate({
+          id,
+          practiceSessionId,
+          scramble: scramble.notation,
+          durationMs: result.durationMs,
+          penalty: result.penalty,
+          solvedAt: new Date().toISOString(),
+          comment: null,
+        });
+      }
+
+      loadScramble();
+    },
+    [practiceSessionId, scramble, saveSolve, loadScramble],
+  );
+
   const timer = useTimer({
-    config: { ...DEFAULT_TIMER_CONFIG, inspectionEnabled },
-    onSolveComplete: useCallback(
-      (result: SolveResult) => {
-        // M7 persists this. For now it stays on screen so the timer is usable on its own.
-        setLastSolve(result);
-        // Fetch the next scramble immediately, so it is on screen and ready before
-        // the cuber reaches for the spacebar again.
-        loadScramble();
-      },
-      [loadScramble],
-    ),
+    config: useMemo(() => ({ ...DEFAULT_TIMER_CONFIG, inspectionEnabled }), [inspectionEnabled]),
+    onSolveComplete: handleSolveComplete,
   });
 
   function applyPenalty(penalty: Penalty): void {
     timer.setPenalty(penalty);
-    setLastSolve((previous) => (previous === null ? null : { ...previous, penalty }));
-  }
+    if (lastSolve === null) return;
 
-  function nextSolve(): void {
-    timer.reset();
-    loadScramble();
+    setLastSolve({ ...lastSolve, penalty });
+    updatePenalty.mutate({ id: lastSolve.id, penalty });
   }
 
   const finished = timer.phase === 'stopped';
@@ -92,8 +116,8 @@ export function TimerPage(): ReactElement {
       </p>
 
       {/*
-        The timer surface. `touch-none` stops the browser treating a press as the start
-        of a scroll or a pinch, which would otherwise swallow the event on a phone.
+        `touch-none` stops the browser treating a press as the start of a scroll or a
+        pinch, which would otherwise swallow the event on a phone.
       */}
       <section
         {...timer.surfaceProps}
@@ -121,17 +145,15 @@ export function TimerPage(): ReactElement {
                 active={timer.penalty === 'dnf'}
                 onClick={() => applyPenalty(timer.penalty === 'dnf' ? 'none' : 'dnf')}
               />
-              <button
-                type="button"
-                onClick={nextSolve}
-                className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
-              >
-                Next scramble
-              </button>
             </div>
 
             <p className="text-sm text-slate-500">
-              Recorded {formatSolve(lastSolve.durationMs, timer.penalty)} — not yet saved.
+              {formatSolve(lastSolve.durationMs, timer.penalty)} ·{' '}
+              <SaveStatus
+                isSaving={saveSolve.isPending}
+                failed={saveSolve.isError}
+                pendingCount={pendingCount}
+              />
             </p>
           </div>
         ) : (
@@ -141,9 +163,37 @@ export function TimerPage(): ReactElement {
               : 'Hold space, release to start.'}
           </p>
         )}
+
+        {/*
+          Never claim a solve is safe when it is only in this browser. A reassuring tick
+          over unsaved data is worse than an honest warning.
+        */}
+        {pendingCount > 0 && !finished && (
+          <p className="mt-2 text-center text-sm text-amber-700" role="status">
+            {isSyncing
+              ? `Saving ${pendingCount} solve${pendingCount === 1 ? '' : 's'}…`
+              : `${pendingCount} solve${pendingCount === 1 ? '' : 's'} waiting to sync`}
+          </p>
+        )}
       </footer>
     </main>
   );
+}
+
+function SaveStatus({
+  isSaving,
+  failed,
+  pendingCount,
+}: {
+  isSaving: boolean;
+  failed: boolean;
+  pendingCount: number;
+}): ReactElement {
+  if (isSaving) return <span className="text-slate-400">saving…</span>;
+  if (failed || pendingCount > 0) {
+    return <span className="text-amber-700">saved on this device only</span>;
+  }
+  return <span className="text-green-700">saved</span>;
 }
 
 function PenaltyButton({

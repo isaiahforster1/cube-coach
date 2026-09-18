@@ -899,3 +899,144 @@ actually using the thing did.
 
 > "Tests check the code against your intent. They can't check your intent. That one
 > needed a human pressing the spacebar twice."
+
+---
+
+## M7 — Saving solves
+
+### What does "idempotent" mean, and why does this endpoint need it?
+
+An idempotent operation gives the same result whether you do it once or ten times.
+"Set the light to on" is idempotent; "toggle the light" is not.
+
+Creating a solve is normally _not_ idempotent — post it twice, get two rows. That is a
+real problem here, because the dangerous failure is the server committing the row and the
+response never arriving. The client cannot tell that apart from the server never having
+received it. If it retries, it duplicates. If it does not, it loses the solve.
+
+Making the client generate the id removes the dilemma: the server upserts on that id, so
+a second request returns the existing row and changes nothing. Retrying becomes always
+safe, so the client can retry freely.
+
+> "The client generates the id, so the server can upsert on it. A retry after a dropped
+> response returns the existing solve instead of creating a second one — which means the
+> client can retry safely, which is what makes the offline queue possible at all."
+
+### Why write the solve to localStorage _before_ sending it, not after it fails?
+
+Because the cases that lose data are the ones where no failure is ever observed: the tab
+is closed, the browser crashes, the laptop sleeps mid-request. There is no catch block
+for those.
+
+Writing first means the solve is on disk before anything can go wrong, and it is removed
+only once the server has confirmed it. Queueing on failure would only handle the failures
+polite enough to announce themselves.
+
+> "Queue first, send second. Failures that announce themselves are the easy ones —
+> writing on failure misses the tab being closed mid-request."
+
+### Why does the UI distinguish "saved" from "saved on this device only"?
+
+Because a reassuring tick over data that exists in one browser is a lie, and the user only
+discovers it when they open another device and find their session missing.
+
+If the solve is queued, the interface says so. Being honest about uncertainty costs a line
+of text; being wrong costs trust.
+
+### Why retry a 500 but give up on a 400?
+
+A 4xx means the server understood the request and refused it. A malformed payload will be
+refused identically forever, so retrying is an infinite loop that also blocks every solve
+queued behind it.
+
+A 5xx or a network failure genuinely might succeed later.
+
+The exceptions worth knowing are 401 (sign in again and the same request works), 408 and
+429 (the server is explicitly saying "try later").
+
+### What is keyset pagination, and why not just use OFFSET?
+
+`OFFSET 40 LIMIT 20` says "skip forty rows". Two problems.
+
+**It shifts under the reader.** History is newest-first and new solves arrive constantly.
+If three solves are added while someone is reading page two, the rows they already saw get
+pushed down — so page three repeats them. Rows can also be skipped entirely.
+
+**It gets slower the deeper you go.** The database cannot jump to row 10,000; it has to
+walk past the 9,999 before it.
+
+A keyset cursor names a _position_ instead of a distance: "everything older than this
+timestamp". It is stable while rows are inserted, and it uses the index directly, so page
+1,000 costs the same as page 1.
+
+> "Offset is a distance, so it shifts when rows are inserted and gets slower as it grows.
+> A cursor is a position — stable and index-friendly."
+
+### Why does the cursor include the id as well as the timestamp?
+
+Because two solves can land in the same millisecond, and a cursor of "everything before
+12:00:00.000" cannot distinguish between them — one gets skipped or repeated at the page
+boundary.
+
+The comparison is really a row comparison: everything strictly older, _plus_ anything at
+the same instant with a smaller id. There is a test that records four solves at one
+timestamp and pages through them two at a time.
+
+### What is the difference between authentication and authorisation, in this code?
+
+Authentication is "who are you" — the session cookie. Authorisation is "may you touch
+this particular row".
+
+Confusing them is one of the most common serious bugs in a web application, and it is
+invisible in manual testing because you are only ever signed in as yourself. The failing
+shape is an endpoint that checks you are logged in, then acts on whatever id you sent.
+
+So every query here is scoped to the user: `findFirst({ where: { id, userId } })`, never
+`findUnique({ where: { id } })` followed by a check. There are four tests that register a
+second account and confirm it cannot read, edit, delete or post into the first account's
+data.
+
+> "Being logged in isn't permission to touch a specific row. Every lookup is scoped by
+> user id in the query itself, rather than fetched and then checked."
+
+### Why return 404 rather than 403 for someone else's solve?
+
+Because 403 confirms the id exists and belongs to somebody. That is a small leak, and it
+lets an attacker enumerate valid ids.
+
+404 says only "there is nothing here for you", which is true from that user's point of
+view.
+
+### Why can a solve's penalty be edited but not its duration?
+
+Because the duration is a measurement and the penalty is a judgement.
+
+Penalties genuinely get corrected — a cuber marks +2, then realises it was a DNF. The
+measurement never changes retrospectively; allowing it to would make the statistics
+fiction. `durationMs` simply is not in the update schema, so Zod strips it and the request
+fails with nothing left to change. There is a test for that.
+
+### Why does registration create a practice session in the same transaction?
+
+Because a user with no practice session has nowhere to save a solve — the timer would fail
+on first use.
+
+A transaction means the account can never exist in that half-configured state: either both
+rows are written or neither is. If session creation fails, the registration fails too, and
+the user retries rather than ending up with a broken account.
+
+> "Both rows or neither. A user without a session can't save a solve, so that state must
+> never exist."
+
+### What did the browser find that the tests did not, this time?
+
+My own test account was created before registration started making a default session, so
+it had none. The timer silently skipped saving — no error, no warning, the solve simply
+vanished.
+
+That is the exact failure mode ADR-0009 exists to prevent, and I had reintroduced it in
+the client by writing `if (practiceSessionId !== undefined)` and not handling the else.
+
+The fix creates a session when an account has none. The general lesson: a guard clause
+that silently does nothing is a bug waiting to happen. Either handle the case or fail
+loudly.

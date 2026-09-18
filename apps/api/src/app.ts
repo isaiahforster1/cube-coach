@@ -8,6 +8,12 @@ import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 import { createAuthService } from './modules/auth/auth.service.js';
+import { createPracticeSessionsRepository } from './modules/practice-sessions/practice-sessions.repository.js';
+import { registerPracticeSessionRoutes } from './modules/practice-sessions/practice-sessions.routes.js';
+import { createPracticeSessionsService } from './modules/practice-sessions/practice-sessions.service.js';
+import { createSolvesRepository } from './modules/solves/solves.repository.js';
+import { registerSolveRoutes } from './modules/solves/solves.routes.js';
+import { createSolvesService } from './modules/solves/solves.service.js';
 import { registerAuthentication } from './plugins/authenticate.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
 
@@ -84,6 +90,13 @@ export async function buildApp({
 
   const authService = createAuthService(createAuthRepository(prisma));
 
+  const practiceSessionsRepository = createPracticeSessionsRepository(prisma);
+  const practiceSessionsService = createPracticeSessionsService(practiceSessionsRepository);
+  const solvesService = createSolvesService(
+    createSolvesRepository(prisma),
+    practiceSessionsRepository,
+  );
+
   registerErrorHandler(app, config.NODE_ENV === 'production');
   registerAuthentication(app, authService);
   registerHealthRoutes(app);
@@ -97,6 +110,8 @@ export async function buildApp({
   await app.register(
     async (instance) => {
       registerAuthRoutes(instance, authService, limits?.credentialMax ?? 10);
+      registerPracticeSessionRoutes(instance, practiceSessionsService);
+      registerSolveRoutes(instance, solvesService);
     },
     { prefix: '/api/v1' },
   );

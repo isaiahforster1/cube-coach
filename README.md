@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M6 complete** — a working timer with inspection and penalties. Solves are not yet saved.
+Early development. **M7 complete** — solves are saved, and survive being recorded offline.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -18,8 +18,8 @@ Early development. **M6 complete** — a working timer with inspection and penal
 | M4        | Authentication                                         | ✅ Done |
 | M5        | Web shell                                              | ✅ Done |
 | M6        | Timer                                                  | ✅ Done |
-| M7        | Solve and session persistence                          | Next    |
-| M8        | History                                                |         |
+| M7        | Solve and session persistence                          | ✅ Done |
+| M8        | History                                                | Next    |
 | M9        | Statistics and personal records                        |         |
 | M10       | Interactive cube                                       |         |
 | M11       | Algorithm library                                      |         |
