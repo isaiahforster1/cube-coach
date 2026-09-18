@@ -62,6 +62,23 @@ export function createSolvesService(
       await solves.softDelete(id, new Date());
     },
 
+    /**
+     * Undo a delete.
+     *
+     * This is what makes the soft delete worth having: without a way back, `deletedAt`
+     * is just a more complicated `DELETE`. Deleting a solve is a one-click action on a
+     * touch screen next to a running timer, so it needs to be reversible.
+     */
+    async restore(userId: string, id: string) {
+      const existing = await solves.findByIdIncludingDeleted(id, userId);
+      if (existing === null) {
+        throw new ApiError(404, 'SOLVE_NOT_FOUND', 'No such solve');
+      }
+
+      const solve = await solves.restore(id);
+      return toSolveResponse(solve);
+    },
+
     async list(userId: string, query: ListSolvesQuery) {
       const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
       if (query.cursor !== undefined && cursor === null) {

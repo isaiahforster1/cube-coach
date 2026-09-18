@@ -76,9 +76,15 @@ export async function buildApp({
   // The browser must be told our origin trusts the web client, and `credentials` is
   // what allows the session cookie to travel at all. Without it the browser silently
   // drops the cookie on cross-origin requests and every call looks unauthenticated.
+  //
+  // Methods are stated explicitly rather than left to defaults. PATCH and DELETE trigger
+  // a preflight OPTIONS, and if the response does not name the method, the real request
+  // is blocked — surfacing as a bare network error that explains nothing.
   await app.register(cors, {
     origin: config.WEB_ORIGIN,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
   });
 
   await app.register(cookie);

@@ -32,6 +32,15 @@ export function createSolvesRepository(prisma: PrismaClient) {
       });
     },
 
+    /** Includes soft-deleted rows, which is the point of restoring one. */
+    findByIdIncludingDeleted(id: string, userId: string) {
+      return prisma.solve.findFirst({ where: { id, userId } });
+    },
+
+    restore(id: string) {
+      return prisma.solve.update({ where: { id }, data: { deletedAt: null } });
+    },
+
     update(id: string, data: { penalty?: DbPenalty; comment?: string | null }) {
       return prisma.solve.update({ where: { id }, data });
     },

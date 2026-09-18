@@ -1040,3 +1040,81 @@ the client by writing `if (practiceSessionId !== undefined)` and not handling th
 The fix creates a session when an account has none. The general lesson: a guard clause
 that silently does nothing is a bug waiting to happen. Either handle the case or fail
 loudly.
+
+---
+
+## M8 — History
+
+### What does `useInfiniteQuery` do that a plain query does not?
+
+It keeps a list of pages rather than a single result, and it remembers the cursor for the
+next one. Fetching more appends a page instead of replacing the data, so previously
+loaded solves stay on screen.
+
+The important discipline: the client never builds a cursor itself. The server returns an
+opaque string and the client hands it straight back. That means the pagination strategy —
+keyset today, something else tomorrow — can change entirely without touching the client.
+
+> "The cursor is opaque to the client. It sends back whatever the server gave it, so the
+> server can change how pagination works without breaking anyone."
+
+### Why a "Load more" button rather than infinite scroll?
+
+Infinite scroll makes the page footer unreachable — content keeps appearing as you
+approach the bottom — and it takes control away from anyone navigating by keyboard.
+
+A button is an explicit, focusable control that says what it does. Infinite scroll is
+worth it for a feed you browse idly; a solve history is something you search deliberately.
+
+### Why undo instead of a confirmation dialogue?
+
+A confirmation interrupts _every_ delete in order to guard against the rare mistaken one.
+Users learn to dismiss it without reading, which means it stops protecting anything while
+still costing a click each time.
+
+Undo inverts the trade: the common case (you meant it) costs nothing, and the rare case
+is recoverable. It only works because the delete is soft — the row is still there with
+`deletedAt` set.
+
+This is also why the restore endpoint was added in this milestone. Without a way back, a
+soft delete is just a more complicated hard delete: the extra column buys nothing.
+
+> "Confirmations tax every action to catch the rare mistake, and people click through them
+> anyway. Undo costs nothing when you meant it and fixes it when you didn't."
+
+### Why is the newest solve numbered highest?
+
+Because cubers count a session from its first solve: "that was my fortieth today". The
+list is newest-first, so the numbering runs the other way — the top row carries the
+highest number.
+
+Small thing, and it is the kind of detail that tells a user whether the person who built
+the tool actually uses one.
+
+### What went wrong with CORS, and why was it so hard to read?
+
+`PATCH` and `DELETE` failed with `net::ERR_FAILED` — a bare network error with no
+explanation — while `GET` and `POST` worked.
+
+The cause: those methods trigger a **preflight**. Before sending the real request, the
+browser sends an `OPTIONS` asking "may I send a PATCH here, with these headers?" If the
+answer does not explicitly name the method, the real request is never sent.
+
+The preflight itself returned 204, which made it look fine. The failure showed up only on
+the request that followed.
+
+The fix was to name the allowed methods explicitly instead of relying on defaults. The
+general lesson: when a cross-origin request fails with no useful error, look at the
+preflight, not at the request you can see.
+
+> "PATCH and DELETE are preflighted. The OPTIONS response has to name the method or the
+> browser blocks the real request — and it surfaces as a generic network error, not a
+> CORS message."
+
+### Why did `POST /solves/:id/restore` return 400 when it takes no body?
+
+Because the client was still sending `Content-Type: application/json` with an empty body.
+Fastify believed the header, tried to parse nothing as JSON, and rejected the request.
+
+The fix: only set the content type when there is actually a body to describe. A header is
+a claim about the payload, and claiming JSON with nothing attached is simply false.

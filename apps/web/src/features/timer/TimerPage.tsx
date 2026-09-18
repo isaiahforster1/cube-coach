@@ -6,7 +6,7 @@ import {
   type Penalty,
   type Scramble,
 } from '@cube-coach/shared';
-import { useLogout, useSession } from '../auth/use-session.js';
+import { AppLayout } from '../../components/AppLayout.js';
 import {
   useCurrentPracticeSession,
   useSaveSolve,
@@ -19,9 +19,6 @@ import { useTimer, type SolveResult } from './use-timer.js';
 const scrambles = createRandomStateScrambleProvider();
 
 export function TimerPage(): ReactElement {
-  const { data: user } = useSession();
-  const logout = useLogout();
-
   const { practiceSessionId } = useCurrentPracticeSession();
   const saveSolve = useSaveSolve();
   const updatePenalty = useUpdateSolvePenalty();
@@ -48,8 +45,8 @@ export function TimerPage(): ReactElement {
       const id = crypto.randomUUID();
       setLastSolve({ ...result, id });
 
-      // The scramble is captured as it was when the solve started, not read later —
-      // the next one is already being fetched by the time this runs.
+      // The scramble is captured as it was when this solve started — the next one is
+      // already being fetched by the time this runs.
       if (practiceSessionId !== undefined && scramble !== null) {
         saveSolve.mutate({
           id,
@@ -83,14 +80,9 @@ export function TimerPage(): ReactElement {
   const finished = timer.phase === 'stopped';
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-8">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900">CubeCoach</h1>
-          <p className="text-sm text-slate-500">{user?.displayName}</p>
-        </div>
-
-        <div className="flex items-center gap-4">
+    <AppLayout>
+      <div className="flex flex-col">
+        <div className="flex items-center justify-end">
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
               type="checkbox"
@@ -100,83 +92,75 @@ export function TimerPage(): ReactElement {
             />
             Inspection
           </label>
-
-          <button
-            type="button"
-            onClick={() => logout.mutate()}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Sign out
-          </button>
         </div>
-      </header>
 
-      <p className="mt-10 text-center font-mono text-lg break-words text-slate-700">
-        {scramble?.notation ?? 'Generating scramble…'}
-      </p>
-
-      {/*
-        `touch-none` stops the browser treating a press as the start of a scroll or a
-        pinch, which would otherwise swallow the event on a phone.
-      */}
-      <section
-        {...timer.surfaceProps}
-        className="flex flex-1 touch-none items-center justify-center py-16 select-none"
-      >
-        <TimerDisplay
-          phase={timer.phase}
-          displayMs={timer.displayMs}
-          penalty={timer.penalty}
-          inspectionRemainingMs={timer.inspectionRemainingMs}
-        />
-      </section>
-
-      <footer className="min-h-24">
-        {finished && lastSolve !== null ? (
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex gap-2">
-              <PenaltyButton
-                label="+2"
-                active={timer.penalty === 'plus2'}
-                onClick={() => applyPenalty(timer.penalty === 'plus2' ? 'none' : 'plus2')}
-              />
-              <PenaltyButton
-                label="DNF"
-                active={timer.penalty === 'dnf'}
-                onClick={() => applyPenalty(timer.penalty === 'dnf' ? 'none' : 'dnf')}
-              />
-            </div>
-
-            <p className="text-sm text-slate-500">
-              {formatSolve(lastSolve.durationMs, timer.penalty)} ·{' '}
-              <SaveStatus
-                isSaving={saveSolve.isPending}
-                failed={saveSolve.isError}
-                pendingCount={pendingCount}
-              />
-            </p>
-          </div>
-        ) : (
-          <p className="text-center text-sm text-slate-400">
-            {inspectionEnabled
-              ? 'Press space to begin inspection, then hold to start.'
-              : 'Hold space, release to start.'}
-          </p>
-        )}
+        <p className="mt-6 text-center font-mono text-lg break-words text-slate-700">
+          {scramble?.notation ?? 'Generating scramble…'}
+        </p>
 
         {/*
-          Never claim a solve is safe when it is only in this browser. A reassuring tick
-          over unsaved data is worse than an honest warning.
+          `touch-none` stops the browser treating a press as the start of a scroll or a
+          pinch, which would otherwise swallow the event on a phone.
         */}
-        {pendingCount > 0 && !finished && (
-          <p className="mt-2 text-center text-sm text-amber-700" role="status">
-            {isSyncing
-              ? `Saving ${pendingCount} solve${pendingCount === 1 ? '' : 's'}…`
-              : `${pendingCount} solve${pendingCount === 1 ? '' : 's'} waiting to sync`}
-          </p>
-        )}
-      </footer>
-    </main>
+        <section
+          {...timer.surfaceProps}
+          className="flex touch-none items-center justify-center py-20 select-none"
+        >
+          <TimerDisplay
+            phase={timer.phase}
+            displayMs={timer.displayMs}
+            penalty={timer.penalty}
+            inspectionRemainingMs={timer.inspectionRemainingMs}
+          />
+        </section>
+
+        <div className="min-h-24">
+          {finished && lastSolve !== null ? (
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex gap-2">
+                <PenaltyButton
+                  label="+2"
+                  active={timer.penalty === 'plus2'}
+                  onClick={() => applyPenalty(timer.penalty === 'plus2' ? 'none' : 'plus2')}
+                />
+                <PenaltyButton
+                  label="DNF"
+                  active={timer.penalty === 'dnf'}
+                  onClick={() => applyPenalty(timer.penalty === 'dnf' ? 'none' : 'dnf')}
+                />
+              </div>
+
+              <p className="text-sm text-slate-500">
+                {formatSolve(lastSolve.durationMs, timer.penalty)} ·{' '}
+                <SaveStatus
+                  isSaving={saveSolve.isPending}
+                  failed={saveSolve.isError}
+                  pendingCount={pendingCount}
+                />
+              </p>
+            </div>
+          ) : (
+            <p className="text-center text-sm text-slate-400">
+              {inspectionEnabled
+                ? 'Press space to begin inspection, then hold to start.'
+                : 'Hold space, release to start.'}
+            </p>
+          )}
+
+          {/*
+            Never claim a solve is safe when it exists only in this browser. A reassuring
+            tick over unsaved data is worse than an honest warning.
+          */}
+          {pendingCount > 0 && !finished && (
+            <p className="mt-2 text-center text-sm text-amber-700" role="status">
+              {isSyncing
+                ? `Saving ${pendingCount} solve${pendingCount === 1 ? '' : 's'}…`
+                : `${pendingCount} solve${pendingCount === 1 ? '' : 's'} waiting to sync`}
+            </p>
+          )}
+        </div>
+      </div>
+    </AppLayout>
   );
 }
 
@@ -210,8 +194,8 @@ function PenaltyButton({
       type="button"
       onClick={(event) => {
         onClick();
-        // Drop focus, so the next spacebar press starts a solve instead of pressing
-        // this button again.
+        // Drop focus, so the next spacebar press starts a solve instead of pressing this
+        // button again.
         event.currentTarget.blur();
       }}
       aria-pressed={active}

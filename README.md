@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M7 complete** — solves are saved, and survive being recorded offline.
+Early development. **M8 complete** — timer, saved solves, and a paginated history you can edit.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -19,8 +19,8 @@ Early development. **M7 complete** — solves are saved, and survive being recor
 | M5        | Web shell                                              | ✅ Done |
 | M6        | Timer                                                  | ✅ Done |
 | M7        | Solve and session persistence                          | ✅ Done |
-| M8        | History                                                | Next    |
-| M9        | Statistics and personal records                        |         |
+| M8        | History                                                | ✅ Done |
+| M9        | Statistics and personal records                        | Next    |
 | M10       | Interactive cube                                       |         |
 | M11       | Algorithm library                                      |         |
 | M12       | Hardening and deployment                               |         |

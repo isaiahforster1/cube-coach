@@ -447,3 +447,69 @@ describe('GET /solves pagination', () => {
     expect(response.json().error.code).toBe('INVALID_CURSOR');
   });
 });
+
+describe('POST /solves/:id/restore', () => {
+  /**
+   * Without this, a soft delete is just a more complicated hard delete. Deleting a solve
+   * is a one-tap action next to a running timer, so it has to be reversible.
+   */
+  it('brings a deleted solve back', async () => {
+    const created = await postSolve(solvePayload());
+    const id = created.json().solve.id;
+
+    await context.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/solves/${id}`,
+      cookies: { [SESSION_COOKIE]: cookie },
+    });
+
+    const restored = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/solves/${id}/restore`,
+      cookies: { [SESSION_COOKIE]: cookie },
+    });
+
+    expect(restored.statusCode).toBe(200);
+
+    const list = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/solves',
+      cookies: { [SESSION_COOKIE]: cookie },
+    });
+    expect(list.json().solves).toHaveLength(1);
+    expect(list.json().solves[0].durationMs).toBe(12_340);
+  });
+
+  it('will not restore another user’s solve', async () => {
+    const created = await postSolve(solvePayload());
+    const id = created.json().solve.id;
+    await context.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/solves/${id}`,
+      cookies: { [SESSION_COOKIE]: cookie },
+    });
+
+    const other = await registerOtherUser();
+    const response = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/solves/${id}/restore`,
+      cookies: { [SESSION_COOKIE]: other.cookie },
+    });
+
+    expect(response.statusCode).toBe(404);
+    const row = await context.prisma.solve.findFirstOrThrow();
+    expect(row.deletedAt).not.toBeNull();
+  });
+
+  it('is harmless on a solve that was never deleted', async () => {
+    const created = await postSolve(solvePayload());
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/solves/${created.json().solve.id}/restore`,
+      cookies: { [SESSION_COOKIE]: cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+});

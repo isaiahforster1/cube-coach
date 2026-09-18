@@ -39,10 +39,6 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
        * with no error to explain why.
        */
       credentials: 'include',
-      headers: {
-        'content-type': 'application/json',
-        ...init.headers,
-      },
     });
   } catch (cause) {
     // fetch only rejects when the request never completed: offline, DNS failure, CORS
@@ -70,14 +66,27 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return body as T;
 }
 
+/**
+ * A JSON content-type is only set when there is a body to describe.
+ *
+ * Sending `Content-Type: application/json` with an empty body makes Fastify try to parse
+ * nothing as JSON and reject the request with a 400 — which is how a POST that takes no
+ * body, like restoring a solve, fails for a reason that has nothing to do with the
+ * operation.
+ */
+function jsonBody(body: unknown): RequestInit {
+  if (body === undefined) return {};
+  return {
+    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+  };
+}
+
 export const api = {
   get: <T>(path: string) => apiRequest<T>(path, { method: 'GET' }),
   post: <T>(path: string, body?: unknown) =>
-    apiRequest<T>(path, {
-      method: 'POST',
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }),
+    apiRequest<T>(path, { method: 'POST', ...jsonBody(body) }),
   patch: <T>(path: string, body: unknown) =>
-    apiRequest<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+    apiRequest<T>(path, { method: 'PATCH', ...jsonBody(body) }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
 };

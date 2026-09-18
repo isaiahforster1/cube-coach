@@ -36,6 +36,11 @@ export function registerSolveRoutes(app: FastifyInstance, service: SolvesService
     return reply.send({ solve });
   });
 
+  app.post<{ Params: { id: string } }>('/solves/:id/restore', auth, async (request, reply) => {
+    const solve = await service.restore(currentUser(request).id, request.params.id);
+    return reply.send({ solve });
+  });
+
   app.delete<{ Params: { id: string } }>('/solves/:id', auth, async (request, reply) => {
     await service.remove(currentUser(request).id, request.params.id);
     return reply.status(204).send();
