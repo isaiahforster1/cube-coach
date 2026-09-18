@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
@@ -66,6 +67,14 @@ export async function buildApp({
   app.decorate('prisma', prisma);
   app.decorate('config', config);
 
+  // The browser must be told our origin trusts the web client, and `credentials` is
+  // what allows the session cookie to travel at all. Without it the browser silently
+  // drops the cookie on cross-origin requests and every call looks unauthenticated.
+  await app.register(cors, {
+    origin: config.WEB_ORIGIN,
+    credentials: true,
+  });
+
   await app.register(cookie);
   await app.register(rateLimit, {
     // A global ceiling. Individual routes tighten it where it matters.
@@ -78,7 +87,19 @@ export async function buildApp({
   registerErrorHandler(app, config.NODE_ENV === 'production');
   registerAuthentication(app, authService);
   registerHealthRoutes(app);
-  registerAuthRoutes(app, authService, limits?.credentialMax ?? 10);
+  // Everything except the health probes lives under a version prefix. Versioning
+  // from the start means a future breaking change can ship as /api/v2 alongside
+  // v1, instead of forcing every client to update on the same day.
+  //
+  // Health checks stay at the root, unversioned, because they are infrastructure
+  // rather than API: a platform probing /health should not care what version the
+  // application is on.
+  await app.register(
+    async (instance) => {
+      registerAuthRoutes(instance, authService, limits?.credentialMax ?? 10);
+    },
+    { prefix: '/api/v1' },
+  );
 
   return app;
 }

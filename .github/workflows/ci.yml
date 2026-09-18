@@ -70,5 +70,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # A production build catches problems the other gates miss: a broken Vite
+      # config, an import that only resolves in dev, or a dependency that cannot
+      # be bundled. It also keeps the bundle honest.
+      - name: Build web
+        run: pnpm --filter @cube-coach/web run build
+
       - name: Test
         run: pnpm run test

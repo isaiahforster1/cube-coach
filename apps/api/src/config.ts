@@ -20,6 +20,15 @@ const environmentSchema = z.object({
 
   HOST: z.string().default('127.0.0.1'),
 
+  /**
+   * Where the web client is served from.
+   *
+   * CORS must name this origin explicitly. The wildcard `*` is forbidden by the spec
+   * whenever credentials are involved, and our session cookie is a credential — a
+   * browser will refuse the response outright rather than sending the cookie.
+   */
+  WEB_ORIGIN: z.string().default('http://localhost:5173'),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

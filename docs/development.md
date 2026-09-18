@@ -43,6 +43,21 @@ pnpm run check
 `check` runs the same four gates as CI: formatting, linting, type checking and tests. If
 it passes locally it should pass in CI.
 
+## Running the app
+
+Two processes, in separate terminals:
+
+```bash
+pnpm --filter @cube-coach/api dev    # http://localhost:3000
+pnpm --filter @cube-coach/web dev    # http://localhost:5173
+```
+
+The database must be running first (`docker compose up -d`).
+
+The two run on different origins, so the API sets CORS headers naming the web
+origin and the client sends `credentials: 'include'` on every request. Both are
+required for the session cookie to work at all; see ADR-0006 and ADR-0007.
+
 ## The database
 
 PostgreSQL runs in Docker, from `docker-compose.yml` at the repository root. It listens

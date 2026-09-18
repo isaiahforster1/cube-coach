@@ -593,3 +593,163 @@ size, so an unbounded password field is another way to make the server do expens
 
 Because raising the minimum later would otherwise lock out every existing user. Login
 must accept whatever people actually have; the policy applies when a password is _set_.
+
+---
+
+## M5 — Web shell
+
+### Why does every request need `credentials: 'include'`?
+
+Because `fetch` does not send cookies to a different origin unless you tell it to. The
+web client runs on port 5173 and the API on port 3000, which are different origins.
+
+Without that one option, the session cookie is silently dropped, every request looks
+logged out, and there is no error explaining why — the request succeeds and simply comes
+back 401. It is the kind of bug that eats an afternoon, which is why the whole client
+goes through one wrapper that sets it once.
+
+> "Cookies aren't sent cross-origin by default. One fetch wrapper sets credentials:
+> include so it can't be forgotten at a call site."
+
+### What is CORS actually doing here?
+
+The browser refuses to let one origin read another origin's responses unless that origin
+opts in. The API sends headers naming our web origin as allowed.
+
+The detail worth knowing: **the wildcard `*` is forbidden when credentials are
+involved.** A cookie is a credential, so the API has to name `http://localhost:5173`
+exactly. That is why `WEB_ORIGIN` is a configured environment variable rather than a
+convenient star.
+
+> "CORS is the server telling the browser which origins may read its responses. With
+> credentials you can't use a wildcard, so the allowed origin is explicit config."
+
+### Why validate on the client when the server already validates?
+
+Speed of feedback, not security.
+
+Client-side validation saves a round trip for an obvious mistake — a malformed email
+should not need a network request to be rejected. That is a user-experience win.
+
+It is **not** a security control. Anything sent from a browser can be forged; the request
+does not have to come from our form at all. So the server validates independently, always,
+and a test posts `isAdmin: true` to confirm the extra field goes nowhere.
+
+The schemas come from `packages/shared`, so both sides check against the same definition
+and cannot disagree about what a valid email is.
+
+> "Client validation is for feedback; server validation is for correctness. Same Zod
+> schema from the shared package, so they can't drift — but the server never trusts the
+> client."
+
+### Why does the protected route have a loading state?
+
+Because on a hard refresh the app does not yet know whether you are signed in — the
+session request is still in flight.
+
+If it redirected while the answer was unknown, every authenticated user would be bounced
+to the login page on every reload and then bounced back once the session resolved. A
+visible flicker, a lost scroll position, and a lost URL.
+
+So it renders a loading state until the answer arrives. There is a test for it: a fetch
+that never settles, asserting that neither the login page nor the protected page renders.
+
+### Why is a 401 from `/auth/me` not treated as an error?
+
+Because "nobody is signed in" is a normal answer to "who is signed in?", not a failure.
+
+If it threw, every page would have to distinguish "the request failed" from "you are
+logged out". Handling it once, in the session hook, means the rest of the app sees either
+a user or `null`.
+
+### Why does the query client retry 5xx but never 4xx?
+
+A 4xx means the server understood the request and rejected it. Sending it again changes
+nothing except delaying the error the user needs to see. A 401 will still be a 401.
+
+A 5xx or a dropped connection genuinely might succeed on a second attempt.
+
+Mutations do not retry at all by default, because a mutation changes something and
+retrying risks doing it twice.
+
+> "Retrying a 4xx is pointless — the answer won't change. Retrying a mutation risks
+> doing it twice."
+
+### Why does logging out clear the whole cache, not just the session?
+
+Because everything else in the cache belongs to the user who just left. Their solves,
+their statistics, their personal records are all still sitting in memory, and whoever
+signs in next on that machine would see them.
+
+Clearing only the session key would leave a data leak that looks exactly like a rendering
+bug.
+
+### What does `htmlFor` on a label actually buy?
+
+It associates the label with the input. Three concrete consequences:
+
+1. Clicking the label focuses the field — a bigger tap target, which matters on a phone.
+2. A screen reader announces what the field is when focus lands on it. Without the
+   association it announces "edit text, blank" and the user has no idea what to type.
+3. `getByLabelText` in tests only finds the input if the association is real — so the
+   test passing is itself evidence the accessibility works.
+
+That third point is why the tests query by label rather than by CSS class or test id.
+
+### What do `aria-invalid` and `aria-describedby` do?
+
+`aria-invalid` marks the field as failing validation, so assistive technology says so.
+`aria-describedby` points at the error message element, so the error is _read out_ when
+focus reaches the field.
+
+Without them, a validation error is red text that a sighted mouse user might notice and
+nobody else will. The information is on screen but not in the accessibility tree.
+
+### Why `role="alert"` on the sign-in failure?
+
+It makes a screen reader announce the message the moment it appears, without the user
+having to go looking for it.
+
+Otherwise a failed sign-in is completely silent: the button stops spinning, nothing
+obvious changes, and the form appears to have done nothing at all.
+
+### Why is the scramble library loaded with a dynamic import?
+
+`cubing.js` carries a 670 KB WebAssembly solver. A static import puts it in the initial
+download, delaying the moment the app becomes usable.
+
+The production build confirms it works: the WASM lands in its own chunk, fetched only
+when a scramble is first requested. The entry chunk is 117 KB gzipped — React, the
+router, the query client, Zod and our own code.
+
+The same build also settled the risk logged in ADR-0004: **`three.js` is not in the
+bundle.** `cubing` depends on it for a 3D player we never import, and tree-shaking
+removes it. Worth checking rather than assuming, which is why it was written down as a
+risk rather than a hope.
+
+### Why does the effect that fetches a scramble have a `cancelled` flag?
+
+Because the component can unmount before the promise resolves, and setting state on an
+unmounted component is a bug.
+
+React's StrictMode runs effects twice in development specifically to surface this class
+of problem. The cleanup function flips the flag, so a response arriving after unmount is
+ignored.
+
+> "The cleanup function marks the effect stale, so a late response doesn't set state on
+> an unmounted component. StrictMode double-invokes effects in dev to make that bug show
+> up early."
+
+### Why version the API path now rather than later?
+
+Because nothing had hardcoded a path yet. Adding `/api/v1` after a client exists means
+changing both sides at the same instant — the coordinated deployment that versioning is
+supposed to make unnecessary.
+
+Health checks stay outside the version, at `/health`, because they are infrastructure
+rather than API. A load balancer probing the service should not need to know what version
+the application is on.
+
+> "Versioning is what lets a breaking change ship as v2 while old clients keep working. I
+> added the prefix before any client hardcoded a path, because retrofitting it is the
+> coordinated change you're trying to avoid."

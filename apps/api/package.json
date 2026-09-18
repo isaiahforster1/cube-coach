@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "start": "node --experimental-strip-types src/server.ts",
     "typecheck": "tsc --noEmit",
@@ -17,6 +18,7 @@
   "dependencies": {
     "@cube-coach/shared": "workspace:*",
     "@fastify/cookie": "^11.1.2",
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",
     "@node-rs/argon2": "^2.2.1",
     "@prisma/adapter-pg": "^7.10.0",

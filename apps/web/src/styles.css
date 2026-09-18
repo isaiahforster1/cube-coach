@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 is configured in CSS rather than a JavaScript config file. */
+@theme {
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', monospace;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}

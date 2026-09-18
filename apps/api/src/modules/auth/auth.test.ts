@@ -24,7 +24,7 @@ const CREDENTIALS = {
 function register(overrides: Record<string, unknown> = {}) {
   return context.app.inject({
     method: 'POST',
-    url: '/auth/register',
+    url: '/api/v1/auth/register',
     payload: { ...CREDENTIALS, ...overrides },
   });
 }
@@ -32,7 +32,7 @@ function register(overrides: Record<string, unknown> = {}) {
 function login(overrides: Record<string, unknown> = {}) {
   return context.app.inject({
     method: 'POST',
-    url: '/auth/login',
+    url: '/api/v1/auth/login',
     payload: { email: CREDENTIALS.email, password: CREDENTIALS.password, ...overrides },
   });
 }
@@ -193,7 +193,7 @@ describe('GET /auth/me', () => {
 
     const response = await context.app.inject({
       method: 'GET',
-      url: '/auth/me',
+      url: '/api/v1/auth/me',
       cookies: { [SESSION_COOKIE]: token },
     });
 
@@ -202,7 +202,7 @@ describe('GET /auth/me', () => {
   });
 
   it('rejects a request with no cookie', async () => {
-    const response = await context.app.inject({ method: 'GET', url: '/auth/me' });
+    const response = await context.app.inject({ method: 'GET', url: '/api/v1/auth/me' });
 
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('NOT_AUTHENTICATED');
@@ -211,7 +211,7 @@ describe('GET /auth/me', () => {
   it('rejects a token that was never issued', async () => {
     const response = await context.app.inject({
       method: 'GET',
-      url: '/auth/me',
+      url: '/api/v1/auth/me',
       cookies: { [SESSION_COOKIE]: 'entirely-made-up' },
     });
 
@@ -228,7 +228,7 @@ describe('GET /auth/me', () => {
 
     const response = await context.app.inject({
       method: 'GET',
-      url: '/auth/me',
+      url: '/api/v1/auth/me',
       cookies: { [SESSION_COOKIE]: token },
     });
 
@@ -245,14 +245,14 @@ describe('POST /auth/logout', () => {
 
     const before = await context.app.inject({
       method: 'GET',
-      url: '/auth/me',
+      url: '/api/v1/auth/me',
       cookies: { [SESSION_COOKIE]: token },
     });
     expect(before.statusCode).toBe(200);
 
     const logout = await context.app.inject({
       method: 'POST',
-      url: '/auth/logout',
+      url: '/api/v1/auth/logout',
       cookies: { [SESSION_COOKIE]: token },
     });
     expect(logout.statusCode).toBe(204);
@@ -260,7 +260,7 @@ describe('POST /auth/logout', () => {
     // The same token, replayed by someone who had copied it. It must no longer work.
     const after = await context.app.inject({
       method: 'GET',
-      url: '/auth/me',
+      url: '/api/v1/auth/me',
       cookies: { [SESSION_COOKIE]: token },
     });
     expect(after.statusCode).toBe(401);
@@ -271,7 +271,7 @@ describe('POST /auth/logout', () => {
 
     await context.app.inject({
       method: 'POST',
-      url: '/auth/logout',
+      url: '/api/v1/auth/logout',
       cookies: { [SESSION_COOKIE]: token },
     });
 
@@ -280,7 +280,7 @@ describe('POST /auth/logout', () => {
   });
 
   it('succeeds even with no session, and says nothing about the token', async () => {
-    const response = await context.app.inject({ method: 'POST', url: '/auth/logout' });
+    const response = await context.app.inject({ method: 'POST', url: '/api/v1/auth/logout' });
     expect(response.statusCode).toBe(204);
   });
 });
@@ -295,7 +295,7 @@ describe('rate limiting', () => {
       const attempt = () =>
         limited.app.inject({
           method: 'POST',
-          url: '/auth/login',
+          url: '/api/v1/auth/login',
           payload: { email: 'nobody@example.com', password: 'wrong-password-here' },
         });
 
