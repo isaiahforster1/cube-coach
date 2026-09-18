@@ -12,6 +12,11 @@ export interface TestContext {
   close(): Promise<void>;
 }
 
+export interface CreateTestContextOptions {
+  /** Lower these to assert that the rate limiter actually fires. */
+  readonly rateLimit?: { readonly max?: number; readonly credentialMax?: number };
+}
+
 /**
  * Build an application wired to the test database.
  *
@@ -19,7 +24,9 @@ export interface TestContext {
  * body parsing, validation, error handling — without opening a port. That makes these
  * tests as fast as unit tests while still being genuinely end to end.
  */
-export async function createTestContext(): Promise<TestContext> {
+export async function createTestContext(
+  options: CreateTestContextOptions = {},
+): Promise<TestContext> {
   const databaseUrl = process.env['TEST_DATABASE_URL'];
   if (databaseUrl === undefined || databaseUrl === '') {
     throw new Error('TEST_DATABASE_URL is not set');
@@ -34,7 +41,16 @@ export async function createTestContext(): Promise<TestContext> {
   });
 
   const prisma = createPrismaClient(config.DATABASE_URL);
-  const app = buildApp({ config, prisma });
+  const app = await buildApp({
+    config,
+    prisma,
+    // Raised well out of the way by default: every inject() shares one client IP, so
+    // production limits would exhaust after ten logins and fail every later test.
+    rateLimit: {
+      max: options.rateLimit?.max ?? 100_000,
+      credentialMax: options.rateLimit?.credentialMax ?? 100_000,
+    },
+  });
   await app.ready();
 
   return {

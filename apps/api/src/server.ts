@@ -14,7 +14,7 @@ try {
 
 const config = loadConfig();
 const prisma = createPrismaClient(config.DATABASE_URL);
-const app = buildApp({ config, prisma });
+const app = await buildApp({ config, prisma });
 
 /**
  * On SIGTERM a platform gives the process a few seconds before killing it. Using them

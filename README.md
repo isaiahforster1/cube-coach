@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M3 complete** — cube engine, scrambles, and an API with a migrated database. There is no user interface yet.
+Early development. **M4 complete** — cube engine, scrambles, and an API with working authentication. There is no user interface yet.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -15,8 +15,8 @@ Early development. **M3 complete** — cube engine, scrambles, and an API with a
 | M1        | Cube engine: state, moves, notation                    | ✅ Done |
 | M2        | Scramble generation                                    | ✅ Done |
 | M3        | API skeleton and database                              | ✅ Done |
-| M4        | Authentication                                         | Next    |
-| M5        | Web shell                                              |         |
+| M4        | Authentication                                         | ✅ Done |
+| M5        | Web shell                                              | Next    |
 | M6        | Timer                                                  |         |
 | M7        | Solve and session persistence                          |         |
 | M8        | History                                                |         |

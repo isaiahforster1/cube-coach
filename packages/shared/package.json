@@ -16,6 +16,7 @@
     "vitest": "^5.0.1"
   },
   "dependencies": {
-    "cubing": "^0.63.6"
+    "cubing": "^0.63.6",
+    "zod": "^4.6.5"
   }
 }

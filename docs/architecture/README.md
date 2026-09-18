@@ -36,3 +36,4 @@ reversal destroys the only thing this directory is for.
 | [0003](0003-cube-state-representation.md)               | Represent the cube as stickers, not pieces            | Accepted |
 | [0004](0004-scramble-generation.md)                     | Use cubing.js for scrambles, behind our own interface | Accepted |
 | [0005](0005-integration-tests-against-real-database.md) | Integration tests run against a real database         | Accepted |
+| [0006](0006-session-cookies-not-jwt.md)                 | Database-backed session cookies, not JWTs             | Accepted |

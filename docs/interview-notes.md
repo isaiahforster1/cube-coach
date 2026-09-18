@@ -413,3 +413,183 @@ when profiling says to, not in advance.
 
 > "It's a cache, and caches need invalidating. Three different operations can change a
 > personal best, so I compute it on read until measurements say otherwise."
+
+---
+
+## M4 — Authentication
+
+### Why sessions in a cookie instead of a JWT?
+
+This is the best answer in the whole project, because almost every candidate reaches for
+a JWT without being able to say why.
+
+A JWT is signed and self-contained: the server can validate it without a database lookup.
+That statelessness is the entire point, and it matters when many services must validate
+independently.
+
+The cost is that **a JWT cannot be revoked**. It is valid until it expires. "Log out"
+does not log anyone out — it only deletes the token from the browser that had it. Anyone
+who copied it keeps working access.
+
+The usual fix is short access tokens plus refresh tokens, rotation, and a revocation
+list. That is server-side state again, with more moving parts and more ways to get it
+wrong.
+
+We have one API and one client, so statelessness buys nothing. A random token stored in
+the database costs one indexed lookup per request and makes logout actually work. There
+is a test that proves it: log out, replay the same token, get 401.
+
+> "JWTs buy statelessness, which matters across many services. I have one API, so it
+> bought nothing, and the cost is that you can't revoke them. Opaque session tokens cost
+> one indexed lookup and make logout real. I'd revisit it for a mobile client."
+
+### Why is the session token hashed with SHA-256, but the password with Argon2?
+
+Because they are attacked differently.
+
+A **password** is low-entropy — people pick real words. An attacker with the hashes tries
+billions of likely candidates, so the hash must be deliberately slow and memory-hungry to
+make that expensive.
+
+A **session token** is 256 random bits. There is no dictionary, no likely guess, no
+shortcut. Making the hash slow buys nothing and would add a deliberate delay to every
+single authenticated request.
+
+Hashing the token at all is still essential, for the same reason as passwords: a leaked
+database dump then contains no usable sessions.
+
+> "Slow hashing defends against guessing. A random 256-bit token can't be guessed, so
+> slowness buys nothing and costs latency on every request. It's still hashed so a dump
+> yields no working sessions."
+
+### What does Argon2id actually do that makes it good?
+
+It is **memory-hard**. A GPU can do billions of simple hashes per second because they are
+arithmetic, and GPUs have thousands of tiny cores. Argon2id forces each hash to use 19 MiB
+of memory, and a GPU cannot give thousands of parallel threads 19 MiB each. Memory, not
+arithmetic, becomes the bottleneck — which is exactly where specialised cracking hardware
+loses its advantage.
+
+The parameters are encoded inside the hash string itself, which is why raising the cost
+later does not invalidate existing passwords.
+
+### What does `httpOnly` protect against?
+
+JavaScript cannot read an `httpOnly` cookie. So if an attacker gets a script onto your
+page — a cross-site scripting bug, a compromised dependency — it still cannot read the
+session token.
+
+This is the concrete argument against the common pattern of storing a JWT in
+`localStorage`: `localStorage` is readable by any script that runs on the page. The token
+is in a cookie precisely so that our own JavaScript cannot touch it.
+
+### What does `sameSite=lax` protect against?
+
+Cross-site request forgery. Without it, a malicious page could submit a form to our API
+and the browser would helpfully attach your session cookie, performing an action as you.
+
+`sameSite=lax` tells the browser not to send the cookie on cross-site POST requests, which
+breaks that attack without any separate CSRF token. "Lax" rather than "strict" so that
+following a link into the app from elsewhere still arrives logged in.
+
+> "SameSite=lax stops the browser attaching the cookie to cross-site POSTs, which is what
+> CSRF depends on. Strict would also block normal inbound links."
+
+### Why do an unknown email and a wrong password give the same response?
+
+Because telling them apart turns the login endpoint into a way to discover which email
+addresses have accounts.
+
+That matters twice over. It is a privacy leak on its own — this site knows whether a
+given person has an account here. And it is the first step of a targeted attack: confirm
+the account exists, then concentrate guessing on it.
+
+So both return an identical status, code and message.
+
+There is a subtler version of the same leak: **timing**. If the code returned early when
+the user was not found, that response would come back in a millisecond while a real one
+took ten, and the difference is measurable. So the service verifies the password against
+a throwaway hash even when there is no user, making both paths cost the same.
+
+> "Same status, same code, same message, and the same work done — otherwise the response
+> time itself tells you whether the account exists."
+
+### Why is registration allowed to reveal that an email exists?
+
+Because there is no way around it: the user has to be told their email is already
+registered, or they cannot proceed.
+
+The mitigation is elsewhere — rate limiting on the endpoint, so it cannot be used to test
+thousands of addresses. Worth being able to say out loud, because noticing the asymmetry
+is the interesting part.
+
+### Why rate limit the login endpoint specifically?
+
+Two reasons, and the second is the less obvious one.
+
+The obvious one is credential stuffing: someone has a list of leaked passwords and wants
+to try them all.
+
+The other is that **our own password hashing is the vulnerability**. Argon2id is
+deliberately expensive — that is the point. An attacker who sends a thousand login
+requests a second is making the server do a thousand expensive hashes a second, and it
+falls over. The defence that protects passwords becomes a denial-of-service vector unless
+it is throttled.
+
+> "Argon2 is intentionally slow, so an unthrottled login endpoint lets an attacker
+> exhaust CPU just by submitting wrong passwords. Rate limiting protects the server, not
+> just the accounts."
+
+### Why is `trustProxy` only enabled in production?
+
+Rate limiting keys on the client's IP. Behind a load balancer the real IP arrives in the
+`X-Forwarded-For` header, so Fastify has to be told to trust it.
+
+But that header is just a header — anyone can set it. Trusting it when there is _no_
+proxy in front means any client can claim any IP and walk straight around the rate limit.
+So it is on in production, where a load balancer sets it, and off everywhere else.
+
+### What is a preHandler, and why is auth opt-in per route?
+
+Fastify runs a `preHandler` before the route body. `requireAuth` looks up the session and
+either attaches the user to the request or throws a 401, so handlers never deal with
+authentication themselves.
+
+Auth is opt-in — routes declare `preHandler: app.requireAuth` — rather than global with
+exceptions. Both are defensible and the failure modes differ: forgetting to opt in leaves
+an endpoint public, while forgetting an exception breaks login loudly and immediately.
+
+Opt-in was chosen because the protected routes are listed explicitly and are easy to
+audit, and every protected route has a test asserting it rejects anonymous requests. If
+the number of routes grows a lot, global-with-exceptions becomes the safer default.
+
+### Why does the API validate the request body when TypeScript already has types?
+
+Because TypeScript does not exist at runtime. Types are erased when the code compiles —
+they cannot check what actually arrived over the network. A request body is `unknown` no
+matter what the type annotation says.
+
+Zod checks at runtime and _returns_ a typed value, so validation and typing are the same
+step. It also strips unknown fields, so a request cannot smuggle in extra properties — a
+test posts `isAdmin: true` and confirms it goes nowhere.
+
+The schema lives in `packages/shared`, so the client and the server validate against the
+same definition and cannot drift apart.
+
+> "Types are compile-time only, so they can't validate a network payload. Zod validates
+> at runtime and infers the type from the same schema, and the schema is shared with the
+> client."
+
+### Why is the password minimum a length rule and not "must contain a symbol"?
+
+Length is what actually resists guessing. Composition rules mostly produce `Password1!`,
+which is in every cracking dictionary — current NIST guidance recommends against them for
+exactly that reason.
+
+There is a maximum too, for a completely different reason: hashing cost grows with input
+size, so an unbounded password field is another way to make the server do expensive work.
+
+### Why does login accept any password length while registration enforces a minimum?
+
+Because raising the minimum later would otherwise lock out every existing user. Login
+must accept whatever people actually have; the policy applies when a password is _set_.
