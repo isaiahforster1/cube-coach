@@ -1,0 +1,22 @@
+# Normalise line endings. Without this, Windows checkouts commit CRLF and every
+# file shows as fully modified on other machines and in CI.
+* text=auto eol=lf
+
+# Windows-native scripts must keep CRLF or they will not run.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Never touch binaries.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+
+# Lockfiles are generated: collapse them in diffs and reviews.
+pnpm-lock.yaml -diff linguist-generated=true
