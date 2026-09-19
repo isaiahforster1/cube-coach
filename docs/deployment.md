@@ -48,10 +48,28 @@ Keep the `localhost` URI alongside the production one so development keeps worki
 
 ## Database migrations
 
-Run `pnpm --filter @cube-coach/api db:deploy` against the production database as part of
-releasing, before the new containers take traffic. `migrate deploy` only applies
-migrations that already exist — it never generates one and never prompts, which is what
-makes it safe to run automatically.
+The database starts empty, and the service fails its readiness check until the tables
+exist.
+
+Set this as the platform's **pre-deploy command**, so it runs against the production
+database before the new container takes traffic:
+
+```bash
+cd /app/apps/api && ./node_modules/.bin/prisma migrate deploy
+```
+
+`migrate deploy` only applies migrations that already exist — it never generates one and
+never prompts — which is what makes it safe to run unattended. The Prisma CLI is a
+runtime dependency rather than a development one for exactly this reason.
+
+## Automatic deploys
+
+The platform's GitHub integration deploys on every push to `main`. Turn on its **wait for
+CI** setting, so a push that fails `pnpm run check` never reaches production — otherwise
+the deploy races the tests and usually wins.
+
+Nothing else is needed: no deploy workflow in this repository, no API token, and no
+secret copied anywhere.
 
 ## Health probes
 
