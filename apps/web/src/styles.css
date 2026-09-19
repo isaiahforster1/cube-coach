@@ -3,6 +3,38 @@
 /* Tailwind v4 is configured in CSS rather than a JavaScript config file. */
 @theme {
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', monospace;
+
+  /*
+    Short enough that it never delays reading the tip, long enough that it arrives
+    rather than appearing. Anything past about 200ms starts to feel like waiting.
+
+    Two of them, because a tip that has flipped below its marker should rise out of it
+    the other way — a panel below that animates upwards reads as sliding off.
+  */
+  --animate-tip-up: tip-up 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-tip-down: tip-down 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tip-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tip-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 body {

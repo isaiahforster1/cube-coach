@@ -90,9 +90,17 @@ glance.
 Depth sorting is now the browser's problem. `preserve-3d` handles it, but stacking bugs in
 CSS 3D are debugged by looking, not by testing.
 
-**Not addressed.** The move playground still applies moves instantly. Animating it wants
-the timeline logic extracted out of `useScramblePlayer` into a hook both can share, which
-is a small refactor and deliberately not part of this change.
+**Shared with the playground.** The timeline lives in `useTurnAnimation`, which owns only
+the clock: which move, how far through it is, and when it lands. It has no idea what a
+scramble or a move history is, which is exactly what lets the scramble player and the
+move playground share it — they have completely different notions of "where the cube is"
+and identical notions of "a layer is turning".
+
+The caller keeps owning the position. When a turn lands, the hook hands back a payload and
+the caller updates its own state; the hook never touches a cube. Starting a turn while one
+is running replaces it rather than queueing or refusing, and the caller folds the
+in-flight payload into its own state first, so nothing is lost when someone presses a
+button faster than the cube can turn.
 
 ## Alternatives considered
 

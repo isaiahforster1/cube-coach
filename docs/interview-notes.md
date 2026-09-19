@@ -1577,3 +1577,80 @@ A tenth of a second is short and still too long to spend before showing someone 
 scramble, so the label appears a moment later and the scramble is readable throughout. A
 web worker would remove it from the main thread entirely, which is the right answer if this
 grows and more machinery than a one-off tenth of a second deserves now.
+
+---
+
+## Making it feel finished
+
+### Why does one hook drive both the scramble player and the move playground?
+
+Because they disagree about everything except the animation. The player thinks in "how
+many moves into this scramble am I"; the playground thinks in "here is the list of moves
+someone has pressed". Neither notion belongs in the code that turns a layer.
+
+So `useTurnAnimation` owns only the clock — which move, how far through it is, when it
+lands — and hands back a payload the caller supplied. The caller commits it to its own
+state. The hook never touches a cube.
+
+> "The shared part was the timeline, not the cube. Once I separated those, both pages got
+> the same animation and neither had to learn the other's model."
+
+### Why does starting a turn replace the one already running instead of queueing it?
+
+Because pressing a button four times quickly should move four moves on. Queueing would
+make the cube lag further behind every press; refusing — which the first version did —
+silently dropped presses and made the button feel broken.
+
+Replacing works because the caller folds the in-flight payload into its own state before
+starting the next turn, so the interrupted move is committed rather than lost.
+
+### The collapse animation took three attempts. What was wrong each time?
+
+Worth knowing because each failure looked like success in the DOM.
+
+**First: the grid trick.** CSS cannot interpolate `height` to `auto`, so the fashionable
+answer is a single-row grid transitioning from `0fr` to `1fr` — no measuring needed. In
+the browser it creates a transition, runs it for the full duration, and animates nothing:
+for an auto-height grid there is no free space for the `fr` factor to divide up, so every
+positive value resolves the same and only exactly `0fr` collapses. I only caught it by
+sampling the computed height over time.
+
+**Second: React and the effect fighting over the same property.** Having measured the
+height and set it from a layout effect, I also left `height` in the JSX `style` object.
+React reapplies inline styles on every re-render — including the ones this component
+triggers itself — so it overwrote the animating value mid-flight. The markup looked
+perfectly correct. The fix is that one owner writes a property: the effect owns `height`,
+React owns the rest.
+
+**Third: measuring content that had already been removed.** Closing measured the content
+to animate away from it, but the children were unmounted in that same commit, because the
+"keep them while it closes" flag was state set from an effect — a beat too late. It
+measured zero, so it animated from nothing to nothing. Working the closing state out
+during the render instead fixed it.
+
+> "Three different bugs, and all three rendered markup that looked right. The only thing
+> that found them was sampling the actual computed style over time."
+
+### Why force a reflow instead of using requestAnimationFrame?
+
+Both exist to give the browser a starting value to animate from — two style changes in one
+task get collapsed into one, and then there is nothing to transition.
+
+`requestAnimationFrame` is the common answer and it does not run in a hidden or background
+tab, so a panel toggled there would be stuck holding its starting height. Reading a layout
+property forces the style to be resolved immediately and always works.
+
+The catch is that the line looks like it does nothing, so it is exactly what a tidy-up
+deletes. There is a test that fails if it goes.
+
+### Why does the tooltip measure itself instead of using a distance threshold?
+
+Because its height depends on how long the explanation is. A rule like "flip below if the
+marker is within 150px of the top" is right for one tip and wrong for the next.
+
+It renders above, measures where it landed, and flips below if it has run off the top. The
+measurement happens in a layout effect, which runs before the browser paints, so the flip
+is never visible as a jump.
+
+This was a real bug: the scramble's marker sits near the top of the page and the first
+line of the tip was cut off by the window edge.

@@ -1,5 +1,6 @@
 import { useId, type ReactElement } from 'react';
 import type { Scramble } from '@cube-coach/shared';
+import { Collapse } from '../../components/Collapse.js';
 import { usePreference } from '../../lib/use-preference.js';
 import { CubeView } from '../cube/CubeView.js';
 import { useScramblePlayer } from '../cube/use-scramble-player.js';
@@ -52,25 +53,43 @@ export function ScrambleView({ scramble }: { scramble: Scramble | null }): React
         }}
         aria-expanded={isOpen}
         aria-controls={panelId}
-        className="rounded text-sm text-slate-500 underline decoration-dotted underline-offset-4 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+        className="flex items-center gap-1 rounded px-1 text-sm text-slate-500 transition-colors duration-150 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none motion-reduce:transition-none"
       >
         {isOpen ? 'Hide cube' : 'Show me this scramble'}
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          className={`size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none ${
+            isOpen ? 'rotate-180' : ''
+          }`}
+        >
+          <path
+            d="M4 6.5 8 10.5 12 6.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
 
-      <div id={panelId} hidden={!isOpen}>
-        {/*
-          Mounted only while open. The player holds an animation loop and a cube of 26
-          pieces, and neither should exist for the majority who never open it.
-        */}
-        {isOpen && scramble !== null && (
+      {/*
+        The player is mounted only while the panel is open — it holds an animation loop
+        and a cube of 26 pieces, and neither should exist for the majority who never open
+        it. `Collapse` keeps it mounted until the closing animation finishes, so it
+        shrinks away rather than vanishing and leaving an empty box behind.
+      */}
+      <Collapse open={isOpen} id={panelId}>
+        {scramble !== null && (
           <ScramblePlayer
+            key={scramble.notation}
             scramble={scramble}
             speed={speed}
             onSpeedChange={setSpeed}
-            key={scramble.notation}
           />
         )}
-      </div>
+      </Collapse>
     </div>
   );
 }

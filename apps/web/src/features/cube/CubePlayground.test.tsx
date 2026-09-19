@@ -121,3 +121,70 @@ describe('CubePlayground', () => {
     }
   });
 });
+
+/**
+ * Moves are animated rather than snapped, because watching a layer turn is how someone
+ * who does not read notation learns what a move does. The timeline itself is covered in
+ * `use-turn-animation.test.ts`; these check the page drives it.
+ */
+describe('CubePlayground animation', () => {
+  function turningLayer(container: HTMLElement) {
+    return container.querySelector('[data-testid="turning-layer"]');
+  }
+
+  it('turns the layer rather than jumping to the new position', async () => {
+    mockSession();
+    const user = userEvent.setup();
+    const { container } = renderWithProviders(<CubePlayground />);
+
+    await user.click(screen.getByRole('button', { name: 'R' }));
+
+    expect(turningLayer(container)).toHaveAttribute('data-move', 'R');
+  });
+
+  /** Undo plays the move backwards, so you can see which layer is being given back. */
+  it('runs the move in reverse when undoing', async () => {
+    mockSession();
+    const user = userEvent.setup();
+    const { container } = renderWithProviders(<CubePlayground />);
+
+    await user.click(screen.getByRole('button', { name: "F'" }));
+    await screen.findByText('1 move applied');
+
+    await user.click(screen.getByRole('button', { name: /^Undo/u }));
+
+    // The same move, not its inverse: it is drawn fully turned and then unwound.
+    expect(turningLayer(container)).toHaveAttribute('data-move', "F'");
+    expect(screen.getByText('Solved')).toBeInTheDocument();
+  });
+
+  /**
+   * Pressing buttons faster than the animation must not lose moves. A turn still in the
+   * air counts as done, so the next press builds on it.
+   */
+  it('keeps every move when they are pressed faster than they animate', async () => {
+    mockSession();
+    const user = userEvent.setup();
+    renderWithProviders(<CubePlayground />);
+
+    await user.click(screen.getByRole('button', { name: 'R' }));
+    await user.click(screen.getByRole('button', { name: 'U' }));
+    await user.click(screen.getByRole('button', { name: "R'" }));
+    await user.click(screen.getByRole('button', { name: "U'" }));
+
+    expect(screen.getByText("R U R' U'")).toBeInTheDocument();
+    expect(screen.getByText('4 moves applied')).toBeInTheDocument();
+  });
+
+  it('stops turning when reset', async () => {
+    mockSession();
+    const user = userEvent.setup();
+    const { container } = renderWithProviders(<CubePlayground />);
+
+    await user.click(screen.getByRole('button', { name: 'R' }));
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+
+    expect(turningLayer(container)).toBeNull();
+    expect(screen.getByText('Solved')).toBeInTheDocument();
+  });
+});

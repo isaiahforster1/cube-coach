@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { applyMoves, createSolvedCube, type CubeState, type Move } from '@cube-coach/shared';
-import { fullAngle, quarterTurns } from './geometry.js';
+import { fullAngle } from './geometry.js';
+import { useTurnAnimation } from './use-turn-animation.js';
 import type { PartialTurn } from './CubeView.js';
 
 export interface ScramblePlayerOptions {
@@ -33,40 +34,17 @@ export interface ScramblePlayer {
   reset: () => void;
 }
 
-interface Animation {
-  readonly move: Move;
-  readonly from: number;
-  readonly to: number;
-  readonly startedAt: number;
-  readonly durationMs: number;
-  /** The move count once this animation finishes. */
-  readonly indexAfter: number;
-}
-
-/**
- * A half turn sweeps twice as far, so giving it the same time makes it visibly whip
- * round. Not doubled either — that reads as a stall.
- */
-function durationFor(move: Move, msPerMove: number): number {
-  return Math.abs(quarterTurns(move)) === 2 ? msPerMove * 1.4 : msPerMove;
-}
-
-/** Slow at both ends, quick in the middle, the way a hand turns a layer. */
-function ease(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-}
-
 /**
  * Plays a scramble one move at a time.
  *
- * The split here is the point: this hook owns *when* things happen and the engine owns
- * *what* the cube looks like. It never computes a cube position itself — it tracks how
- * many moves are done and asks `applyMoves` for the rest. So an animation bug can make
- * the cube look wrong for a moment, but it can never leave the cube in a position the
- * engine disagrees with.
+ * The split here is the point: this owns *when* things happen and the engine owns *what*
+ * the cube looks like. It never computes a cube position — it tracks how many moves are
+ * done and asks `applyMoves` for the rest. So an animation bug can make the cube look
+ * wrong for a moment, but it can never leave the cube in a position the engine disagrees
+ * with.
  *
- * The animation is described as "the position after `index` moves, plus this much of
- * the next move". When a turn completes, `index` goes up by one and the partial turn is
+ * The animation is described as "the position after `index` moves, plus this much of the
+ * next move". When a turn completes, `index` goes up by one and the partial turn is
  * dropped — and because a completed turn already looks exactly like the next position,
  * the swap is invisible.
  */
@@ -77,17 +55,23 @@ export function useScramblePlayer({
 }: ScramblePlayerOptions): ScramblePlayer {
   const [index, setIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [animation, setAnimation] = useState<Animation | null>(null);
-  const [frameNow, setFrameNow] = useState(0);
 
-  // The clock is read through a ref so that changing it does not restart the animation
-  // loop, which would reset the turn already in progress.
-  const clock = useRef(now);
-  clock.current = now;
-  const readNow = useCallback(
-    () => (clock.current === undefined ? performance.now() : clock.current()),
-    [],
-  );
+  const animation = useTurnAnimation<number>({
+    msPerMove,
+    ...(now === undefined ? {} : { now }),
+    // The payload is the move count once the turn lands, so committing it is one call.
+    onSettled: setIndex,
+  });
+
+  /**
+   * Where the next step starts from.
+   *
+   * A turn still in the air counts as done. Pressing "next" three times quickly should
+   * move three moves on, not one — ignoring presses until the animation catches up makes
+   * the button feel broken, which is exactly how it felt the first time this was tried
+   * in a browser.
+   */
+  const settled = animation.pending ?? index;
 
   // Derived from the move count, never stored. The position on screen therefore cannot
   // drift away from the moves that produced it.
@@ -96,55 +80,14 @@ export function useScramblePlayer({
     [moves, index],
   );
 
+  const { start, cancel } = animation;
+
   /** Start again whenever the scramble itself changes. */
   useEffect(() => {
     setIndex(0);
-    setAnimation(null);
     setIsPlaying(false);
-  }, [moves]);
-
-  const startTurn = useCallback(
-    (move: Move, from: number, to: number, indexAfter: number) => {
-      setAnimation({
-        move,
-        from,
-        to,
-        startedAt: readNow(),
-        durationMs: durationFor(move, msPerMove),
-        indexAfter,
-      });
-    },
-    [msPerMove, readNow],
-  );
-
-  /** Run the turn in flight, frame by frame. */
-  useEffect(() => {
-    if (animation === null) return;
-
-    let frame = 0;
-
-    function tick(): void {
-      // `animation` cannot be null here: the effect returns above if it is, and a
-      // change to it tears this loop down.
-      const current = animation as Animation;
-
-      if (readNow() - current.startedAt >= current.durationMs) {
-        setIndex(current.indexAfter);
-        setAnimation(null);
-        return;
-      }
-
-      setFrameNow(readNow());
-      frame = requestAnimationFrame(tick);
-    }
-
-    // Draw the starting angle immediately rather than a frame late, which otherwise
-    // shows one frame of the previous turn's final angle.
-    setFrameNow(readNow());
-    frame = requestAnimationFrame(tick);
-
-    return () => cancelAnimationFrame(frame);
-  }, [animation, readNow]);
+    cancel();
+  }, [moves, cancel]);
 
   /**
    * Keep playing.
@@ -154,7 +97,7 @@ export function useScramblePlayer({
    * position that does not exist.
    */
   useEffect(() => {
-    if (!isPlaying || animation !== null) return;
+    if (!isPlaying || animation.isTurning) return;
 
     const next = moves[index];
     if (next === undefined) {
@@ -162,8 +105,8 @@ export function useScramblePlayer({
       return;
     }
 
-    startTurn(next, 0, fullAngle(next), index + 1);
-  }, [isPlaying, animation, index, moves, startTurn]);
+    start({ move: next, from: 0, to: fullAngle(next), payload: index + 1 });
+  }, [isPlaying, animation.isTurning, index, moves, start]);
 
   const pause = useCallback(() => {
     setIsPlaying(false);
@@ -177,34 +120,23 @@ export function useScramblePlayer({
 
   const reset = useCallback(() => {
     setIsPlaying(false);
-    setAnimation(null);
+    cancel();
     setIndex(0);
-  }, []);
-
-  /**
-   * Where a step should start from.
-   *
-   * If a turn is still in flight, it counts as done. Pressing "next" three times
-   * quickly should move three moves on, not one — ignoring the presses until the
-   * animation catches up makes the button feel broken, which is exactly how it felt
-   * the first time this was tried in a browser.
-   */
-  const settled = animation === null ? index : animation.indexAfter;
+  }, [cancel]);
 
   const stepForward = useCallback(() => {
     setIsPlaying(false);
+    setIndex(settled);
 
     const next = moves[settled];
     if (next === undefined) {
-      // Already at the end; just let the turn in flight land.
-      setIndex(settled);
-      setAnimation(null);
+      // Already at the end; just let the turn in flight land where it was going.
+      cancel();
       return;
     }
 
-    setIndex(settled);
-    startTurn(next, 0, fullAngle(next), settled + 1);
-  }, [moves, settled, startTurn]);
+    start({ move: next, from: 0, to: fullAngle(next), payload: settled + 1 });
+  }, [cancel, moves, settled, start]);
 
   /**
    * Step back by un-turning the previous move.
@@ -220,36 +152,25 @@ export function useScramblePlayer({
     const previous = moves[settled - 1];
     if (settled === 0 || previous === undefined) {
       setIndex(settled);
-      setAnimation(null);
+      cancel();
       return;
     }
 
     setIndex(settled - 1);
-    startTurn(previous, fullAngle(previous), 0, settled - 1);
-  }, [moves, settled, startTurn]);
-
-  const turn: PartialTurn | null =
-    animation === null
-      ? null
-      : {
-          move: animation.move,
-          angle:
-            animation.from +
-            (animation.to - animation.from) *
-              ease(
-                Math.min(1, Math.max(0, (frameNow - animation.startedAt) / animation.durationMs)),
-              ),
-        };
+    start({ move: previous, from: fullAngle(previous), to: 0, payload: settled - 1 });
+  }, [cancel, moves, settled, start]);
 
   return {
     state,
-    turn,
+    turn: animation.turn,
     index,
     isPlaying,
     isFinished: settled >= moves.length,
     canStepBack: settled > 0,
     canStepForward: settled < moves.length,
-    currentMove: animation === null ? null : Math.min(animation.indexAfter, index),
+    // Forward: `index` is the move being played. Backward: the move being unwound sits
+    // at `settled - 1`, which is where `index` has already been put.
+    currentMove: animation.isTurning ? Math.min(settled, index) : null,
     play,
     pause,
     stepForward,

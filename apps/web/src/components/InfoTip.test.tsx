@@ -86,3 +86,75 @@ describe('InfoTip', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The scramble's marker sits near the top of the page, and a tip anchored above it ran
+ * off the top of the window and lost its first line.
+ *
+ * The decision is made by measuring rather than by a distance threshold, because the
+ * tip's height depends on how long the explanation is — a rule like "flip if within
+ * 150px of the top" would be right for one tip and wrong for the next.
+ */
+describe('InfoTip placement', () => {
+  /** Pretend every element sits at a given distance from the top of the window. */
+  function pinTopTo(top: number): () => void {
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function fake(this: Element): DOMRect {
+      return { ...original.call(this), top } as DOMRect;
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  }
+
+  function placementOf(container: HTMLElement): string | null {
+    return container.querySelector('[data-placement]')?.getAttribute('data-placement') ?? null;
+  }
+
+  it('sits above the marker when there is room', async () => {
+    const restore = pinTopTo(400);
+    try {
+      const user = userEvent.setup();
+      const { container } = renderTip();
+
+      await user.hover(screen.getByRole('button'));
+      expect(placementOf(container)).toBe('above');
+    } finally {
+      restore();
+    }
+  });
+
+  it('flips below the marker when it would run off the top', async () => {
+    const restore = pinTopTo(-30);
+    try {
+      const user = userEvent.setup();
+      const { container } = renderTip();
+
+      await user.hover(screen.getByRole('button'));
+      expect(placementOf(container)).toBe('below');
+    } finally {
+      restore();
+    }
+  });
+
+  /** The marker may have moved by the next time it opens, so the choice is remade. */
+  it('measures again each time it opens', async () => {
+    const user = userEvent.setup();
+
+    const tight = pinTopTo(-30);
+    const { container } = renderTip();
+    await user.hover(screen.getByRole('button'));
+    expect(placementOf(container)).toBe('below');
+
+    await user.unhover(screen.getByRole('button'));
+    tight();
+
+    const roomy = pinTopTo(400);
+    try {
+      await user.hover(screen.getByRole('button'));
+      expect(placementOf(container)).toBe('above');
+    } finally {
+      roomy();
+    }
+  });
+});
