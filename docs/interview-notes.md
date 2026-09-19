@@ -1654,3 +1654,81 @@ is never visible as a jump.
 
 This was a real bug: the scramble's marker sits near the top of the page and the first
 line of the tip was cut off by the window edge.
+
+---
+
+## The algorithm library (M11)
+
+### Why is a case stored as a position rather than as an algorithm?
+
+Because it makes the library checkable. Every algorithm site stores a name, a move
+sequence and a picture, all typed in by hand, with nothing checking that the three agree.
+
+Here the algorithm is the only stored thing. The position is computed by running it
+backwards from a solved cube, and the picture is that position drawn. A mistyped move
+produces a wrong picture _and_ a failing test, instead of a quietly wrong lesson.
+
+> "The picture can't disagree with the algorithm, because the picture is the algorithm."
+
+### How do you know the library is complete?
+
+The engine counts the cases. With everything below the top layer solved and the top face
+finished, the only freedom left is how four corners and four edges are arranged — and the
+two permutations must have matching parity, because every face turn is a four-cycle of
+each. That is 288 positions.
+
+Two positions are the same _case_ when a cuber would use the same algorithm on them: when
+they differ by adjusting the top layer first, or by holding the cube a quarter turn round.
+Collapsing by both gives 22 classes — 21 cases plus the solved cube.
+
+That is the familiar number, and nobody had to look it up. A test asserts the library hits
+every one of the 21.
+
+> "I didn't count the rows to check it was complete. I had the engine work out how many
+> cases can exist and then checked I'd covered all of them."
+
+### What did that catch?
+
+Two wrong algorithms, neither visible by reading.
+
+One was a duplicate: my Z perm was a perfectly good algorithm that produced a U perm. The
+other was worse — my E perm broke the layers below, and my _replacement_ was built on a
+wrong belief, that E swaps diagonally opposite corners. The engine put that position in the
+same class as the H perm, which turns out to be correct and surprising: a diagonal double
+swap with solved edges really is an H perm once you turn the top layer twice. E swaps
+adjacent pairs.
+
+That is a fact about the cube I neither remembered nor looked up. It fell out of the
+classification.
+
+### So where did the two missing algorithms come from?
+
+A search. Meet in the middle: every position reachable in eight moves from solved, every
+position reachable in seven from the target, and the shortest pair that meet. Storing one
+half and searching the other turns a fifteen-move problem into two eight-move ones, which
+is the difference between minutes and never.
+
+They come out longer than the published algorithms, because the published ones use slice
+moves this engine does not have. The interface says which two were found this way.
+
+### What can't you verify?
+
+The names. The engine can prove that a case is a corner three-cycle and that it is distinct
+from every other case; it cannot know that cubers call that one `Aa` rather than `Ab`.
+
+Worth saying out loud rather than letting it pass, because it is the one part of the
+library resting on memory — and the description beside each case ("three corners cycle,
+edges already done") is computed, so a wrong label is at least visible to someone who knows
+the case.
+
+### How does the engine read corners when it stores stickers?
+
+The same way it already read edges. Eight slots, each listing its three facelet indices in
+clockwise order seen from outside, and a piece is identified by which three faces it shows.
+
+The clockwise ordering is the hand-entered part and the easy thing to get wrong, so it is
+checked by an invariant rather than by eye: every move must leave the total corner twist
+divisible by three. That holds on a real cube and fails immediately if any corner is listed
+the wrong way round.
+
+> "Anything hand-entered gets checked against something the cube itself guarantees."

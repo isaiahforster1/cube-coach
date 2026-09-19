@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { Route, Routes } from 'react-router';
+import { AlgorithmsPage } from './features/algorithms/AlgorithmsPage.js';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { RegisterPage } from './features/auth/RegisterPage.js';
 import { CubePlayground } from './features/cube/CubePlayground.js';
@@ -22,6 +23,7 @@ export function App(): ReactElement {
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/stats" element={<StatsPage />} />
       <Route path="/cube" element={<CubePlayground />} />
+      <Route path="/algorithms" element={<AlgorithmsPage />} />
 
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />

@@ -9,6 +9,11 @@ export interface ScramblePlayerOptions {
   readonly moves: readonly Move[];
   /** How long one quarter turn takes. */
   readonly msPerMove: number;
+  /**
+   * The position to play from. Defaults to a solved cube, which is what a scramble
+   * starts from; an algorithm is played from the case it solves instead.
+   */
+  readonly from?: CubeState;
   /** Injectable clock, so tests can run a whole scramble in microseconds. */
   readonly now?: () => number;
 }
@@ -51,6 +56,7 @@ export interface ScramblePlayer {
 export function useScramblePlayer({
   moves,
   msPerMove,
+  from,
   now,
 }: ScramblePlayerOptions): ScramblePlayer {
   const [index, setIndex] = useState(0);
@@ -75,14 +81,14 @@ export function useScramblePlayer({
 
   // Derived from the move count, never stored. The position on screen therefore cannot
   // drift away from the moves that produced it.
-  const state = useMemo(
-    () => applyMoves(createSolvedCube(), moves.slice(0, index)),
-    [moves, index],
-  );
+  // Memoised so an un-passed `from` does not build a fresh solved cube on every render
+  // and invalidate the position below it.
+  const origin = useMemo(() => from ?? createSolvedCube(), [from]);
+  const state = useMemo(() => applyMoves(origin, moves.slice(0, index)), [origin, moves, index]);
 
   const { start, cancel } = animation;
 
-  /** Start again whenever the scramble itself changes. */
+  /** Start again whenever the sequence itself changes. */
   useEffect(() => {
     setIndex(0);
     setIsPlaying(false);

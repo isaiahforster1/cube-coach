@@ -30,7 +30,15 @@ export interface CubeViewProps {
    * move's full angle it looks exactly like the position after the move.
    */
   readonly turn?: PartialTurn | null;
+  /**
+   * Where to look from, in degrees. The default shows three faces evenly, which suits a
+   * scramble; a last-layer case wants a steeper angle so the top is the face you read.
+   */
+  readonly angle?: { readonly x: number; readonly y: number };
 }
+
+/** Three faces visible and none of them foreshortened much. */
+const DEFAULT_ANGLE = { x: -25, y: -35 };
 
 /** How each face of a small cube is rotated into place. */
 const FACE_TRANSFORMS: Record<Face, string> = {
@@ -68,8 +76,16 @@ const BODY = '#0f172a';
  * rotation, and nothing visibly changes. The animation is decoration; the engine remains
  * the only authority on where stickers actually are.
  */
-export function CubeView({ state, size = 180, label, turn = null }: CubeViewProps): ReactElement {
-  const [rotation, setRotation] = useState({ x: -25, y: -35 });
+export function CubeView({
+  state,
+  size = 180,
+  label,
+  turn = null,
+  angle = DEFAULT_ANGLE,
+}: CubeViewProps): ReactElement {
+  // The starting angle only. Dragging takes over from here, and a change to the prop
+  // afterwards would yank the cube out of the position the viewer put it in.
+  const [rotation, setRotation] = useState(angle);
   const [isDragging, setIsDragging] = useState(false);
   const dragOrigin = useRef<{ x: number; y: number; rotX: number; rotY: number } | null>(null);
 

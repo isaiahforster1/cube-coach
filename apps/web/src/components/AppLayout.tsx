@@ -23,6 +23,7 @@ export function AppLayout({ children }: { children: ReactNode }): ReactElement {
             <NavItem to="/">Timer</NavItem>
             <NavItem to="/history">History</NavItem>
             <NavItem to="/stats">Stats</NavItem>
+            <NavItem to="/algorithms">Algorithms</NavItem>
             <NavItem to="/cube">Cube</NavItem>
           </nav>
         </div>

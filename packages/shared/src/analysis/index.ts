@@ -12,3 +12,4 @@ export {
   type ScrambledSolve,
 } from './cross-insight.js';
 export { EDGE_SLOTS, readEdges, type EdgePlacement } from './edges.js';
+export { CORNER_SLOTS, readCorners, type CornerPlacement } from './corners.js';
