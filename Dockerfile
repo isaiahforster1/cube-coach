@@ -76,4 +76,20 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 WORKDIR /app/apps/api
-CMD ["node", "dist/server.js"]
+
+# Migrate, then serve.
+#
+# The alternative is a separate release step, which is what you want once there are
+# several instances and a deploy has to be zero-downtime: migrations run once, then the
+# new containers start. Here there is one container, and putting it in the image means
+# the release does not depend on a setting in a hosting dashboard that may be named
+# something different next month.
+#
+# `migrate deploy` only applies migrations that already exist, never generates one and
+# never prompts. If it fails the container exits rather than serving against a schema it
+# does not understand — which is the right way round: a deploy that stops is a problem
+# you find, and one that serves half-migrated is a problem your users find.
+#
+# Concurrent starts are safe: Prisma takes an advisory lock, so a second container waits
+# rather than applying the same migration twice.
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/server.js"]
