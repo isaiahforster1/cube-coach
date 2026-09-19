@@ -1,6 +1,14 @@
 import { useId, type ReactElement } from 'react';
 import type { Scramble } from '@cube-coach/shared';
 import { Collapse } from '../../components/Collapse.js';
+import {
+  ChevronDownIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PreviousIcon,
+  RestartIcon,
+} from '../../components/icons.js';
 import { usePreference } from '../../lib/use-preference.js';
 import { CubeView } from '../cube/CubeView.js';
 import { useScramblePlayer } from '../cube/use-scramble-player.js';
@@ -56,22 +64,11 @@ export function ScrambleView({ scramble }: { scramble: Scramble | null }): React
         className="flex items-center gap-1 rounded px-1 text-sm text-slate-500 transition-colors duration-150 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none motion-reduce:transition-none"
       >
         {isOpen ? 'Hide cube' : 'Show me this scramble'}
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
+        <ChevronDownIcon
           className={`size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none ${
             isOpen ? 'rotate-180' : ''
           }`}
-        >
-          <path
-            d="M4 6.5 8 10.5 12 6.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        />
       </button>
 
       {/*
@@ -147,14 +144,21 @@ function ScramblePlayer({
           disabled={!player.canStepBack}
           label="Previous move"
         >
-          ‹
+          <PreviousIcon />
         </ControlButton>
 
+        {/*
+          The one control most people will reach for, so it is filled rather than
+          outlined. Slate rather than the sky accent, which is spoken for by the page's
+          own primary actions — two competing "press me" colours in one view and neither
+          means anything.
+        */}
         <ControlButton
           onClick={player.isPlaying ? player.pause : player.play}
           label={player.isPlaying ? 'Pause' : 'Play the scramble'}
+          emphasis="primary"
         >
-          {player.isPlaying ? '❚❚' : '▶'}
+          {player.isPlaying ? <PauseIcon /> : <PlayIcon />}
         </ControlButton>
 
         <ControlButton
@@ -162,11 +166,11 @@ function ScramblePlayer({
           disabled={!player.canStepForward}
           label="Next move"
         >
-          ›
+          <NextIcon />
         </ControlButton>
 
         <ControlButton onClick={player.reset} disabled={player.index === 0} label="Back to solved">
-          ↺
+          <RestartIcon />
         </ControlButton>
 
         <span className="ml-1 text-sm text-slate-500 tabular-nums" role="status">
@@ -197,16 +201,23 @@ function ScramblePlayer({
   );
 }
 
+const CONTROL_STYLES = {
+  default: 'border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+  primary: 'border-slate-800 bg-slate-800 text-white hover:border-slate-700 hover:bg-slate-700',
+} as const;
+
 function ControlButton({
   onClick,
   disabled = false,
   label,
+  emphasis = 'default',
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
   label: string;
-  children: string;
+  emphasis?: keyof typeof CONTROL_STYLES;
+  children: ReactElement;
 }): ReactElement {
   return (
     <button
@@ -219,7 +230,7 @@ function ControlButton({
         // used, or watching the scramble would quietly break starting a solve.
         event.currentTarget.blur();
       }}
-      className="flex size-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none disabled:opacity-40"
+      className={`flex size-9 items-center justify-center rounded-md border transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none disabled:opacity-40 motion-reduce:transition-none ${CONTROL_STYLES[emphasis]}`}
     >
       {children}
     </button>
