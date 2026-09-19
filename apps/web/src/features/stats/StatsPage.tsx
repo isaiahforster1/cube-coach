@@ -1,6 +1,8 @@
 import type { ReactElement } from 'react';
 import { formatDuration, type AverageResult, type StatsSummary } from '@cube-coach/shared';
 import { AppLayout } from '../../components/AppLayout.js';
+import { InfoTip } from '../../components/InfoTip.js';
+import { STAT_DEFINITIONS } from './definitions.js';
 import { useStatsSummary } from './use-stats.js';
 
 /** Render the three outcomes of an average distinctly. */
@@ -25,14 +27,19 @@ function AverageValue({ result }: { result: AverageResult }): ReactElement {
 
 function Stat({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: ReactElement | string;
 }): ReactElement {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <dt className="text-xs tracking-wide text-slate-500 uppercase">{label}</dt>
+      <dt className="flex items-center gap-1.5 text-xs tracking-wide text-slate-500 uppercase">
+        {label}
+        {hint !== undefined && <InfoTip term={label}>{hint}</InfoTip>}
+      </dt>
       <dd className="mt-1 font-mono text-xl text-slate-900">{children}</dd>
     </div>
   );
@@ -69,13 +76,13 @@ function StatsContent({ summary }: { summary: StatsSummary }): ReactElement {
       <section>
         <h3 className="mb-3 text-sm font-medium text-slate-700">Personal bests</h3>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat label="Best single">
+          <Stat label="Best single" hint={STAT_DEFINITIONS.bestSingle}>
             {bestSingleMs === null ? '—' : formatDuration(bestSingleMs)}
           </Stat>
-          <Stat label="Best ao5">
+          <Stat label="Best ao5" hint={STAT_DEFINITIONS.bestAverage}>
             <AverageValue result={averages.ao5.best} />
           </Stat>
-          <Stat label="Best ao12">
+          <Stat label="Best ao12" hint={STAT_DEFINITIONS.bestAverage}>
             <AverageValue result={averages.ao12.best} />
           </Stat>
         </dl>
@@ -84,16 +91,16 @@ function StatsContent({ summary }: { summary: StatsSummary }): ReactElement {
       <section>
         <h3 className="mb-3 text-sm font-medium text-slate-700">Current averages</h3>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="ao5">
+          <Stat label="ao5" hint={STAT_DEFINITIONS.ao5}>
             <AverageValue result={averages.ao5.current} />
           </Stat>
-          <Stat label="ao12">
+          <Stat label="ao12" hint={STAT_DEFINITIONS.ao12}>
             <AverageValue result={averages.ao12.current} />
           </Stat>
-          <Stat label="ao50">
+          <Stat label="ao50" hint={STAT_DEFINITIONS.ao50}>
             <AverageValue result={averages.ao50.current} />
           </Stat>
-          <Stat label="ao100">
+          <Stat label="ao100" hint={STAT_DEFINITIONS.ao100}>
             <AverageValue result={averages.ao100.current} />
           </Stat>
         </dl>
@@ -106,13 +113,13 @@ function StatsContent({ summary }: { summary: StatsSummary }): ReactElement {
       <section>
         <h3 className="mb-3 text-sm font-medium text-slate-700">Consistency</h3>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Mean">
+          <Stat label="Mean" hint={STAT_DEFINITIONS.mean}>
             {consistency.meanMs === null ? '—' : formatDuration(consistency.meanMs)}
           </Stat>
-          <Stat label="Spread">
+          <Stat label="Spread" hint={STAT_DEFINITIONS.spread}>
             {consistency.spreadMs === null ? '—' : formatDuration(consistency.spreadMs)}
           </Stat>
-          <Stat label="Deviation">
+          <Stat label="Deviation" hint={STAT_DEFINITIONS.deviation}>
             {consistency.standardDeviationMs === null
               ? '—'
               : formatDuration(consistency.standardDeviationMs)}
@@ -124,7 +131,10 @@ function StatsContent({ summary }: { summary: StatsSummary }): ReactElement {
       </section>
 
       <section>
-        <h3 className="mb-3 text-sm font-medium text-slate-700">Cross difficulty</h3>
+        <h3 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+          Cross difficulty
+          <InfoTip term="cross difficulty">{STAT_DEFINITIONS.crossDifficulty}</InfoTip>
+        </h3>
 
         {crossInsight === null ? (
           // Saying nothing is better than saying something unreliable: a cuber who

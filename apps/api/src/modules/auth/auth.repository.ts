@@ -19,6 +19,27 @@ export function createAuthRepository(prisma: PrismaClient) {
      * fail on the very first use. Doing both in a transaction means an account can never
      * exist in that half-configured state — either both rows are written or neither is.
      */
+    findUserByGoogleId(googleId: string) {
+      return prisma.user.findUnique({ where: { googleId } });
+    },
+
+    linkGoogleAccount(userId: string, googleId: string) {
+      return prisma.user.update({ where: { id: userId }, data: { googleId } });
+    },
+
+    /** A Google account has no password, so it is created without one. */
+    createGoogleUser(data: { email: string; displayName: string; googleId: string }) {
+      return prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({ data });
+
+        await tx.practiceSession.create({
+          data: { userId: user.id, name: DEFAULT_PRACTICE_SESSION_NAME },
+        });
+
+        return user;
+      });
+    },
+
     createUser(data: { email: string; passwordHash: string; displayName: string }) {
       return prisma.$transaction(async (tx) => {
         const user = await tx.user.create({ data });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { StatsSummary } from '@cube-coach/shared';
 import { renderWithProviders } from '../../test/render.js';
 import { StatsPage } from './StatsPage.js';
@@ -146,5 +147,46 @@ describe('StatsPage', () => {
     renderWithProviders(<StatsPage />);
 
     expect(await screen.findByText(/no solves yet/iu)).toBeInTheDocument();
+  });
+});
+
+describe('StatsPage explanations', () => {
+  it('offers an explanation for the jargon', async () => {
+    mockStats(summary());
+    renderWithProviders(<StatsPage />);
+
+    await screen.findByText('11.00');
+
+    // "ao5" means nothing to a newcomer, which is a poor reason for a tool to feel like
+    // it is not for them.
+    expect(screen.getByRole('button', { name: 'What is ao5?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What is Spread?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What is Deviation?' })).toBeInTheDocument();
+  });
+
+  it('explains ao5 in plain language when asked', async () => {
+    mockStats(summary());
+    const user = userEvent.setup();
+    renderWithProviders(<StatsPage />);
+
+    await screen.findByText('11.00');
+    await user.click(screen.getByRole('button', { name: 'What is ao5?' }));
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /throws away the fastest and the slowest/iu,
+    );
+  });
+
+  it('explains what a wide spread means, not just what it measures', async () => {
+    mockStats(summary());
+    const user = userEvent.setup();
+    renderWithProviders(<StatsPage />);
+
+    await screen.findByText('11.00');
+    await user.click(screen.getByRole('button', { name: 'What is Spread?' }));
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /inconsistent rather than limited by speed/iu,
+    );
   });
 });

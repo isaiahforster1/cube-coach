@@ -18,7 +18,13 @@ model User {
   /// has no deployment cost.
   email String @unique
 
-  passwordHash String @map("password_hash")
+  /// Null for accounts that only sign in with Google. An account can have both, if
+  /// someone registers with a password and later links Google, or the reverse.
+  passwordHash String? @map("password_hash")
+
+  /// Google's stable subject identifier. Deliberately not the email: an email can be
+  /// reassigned by a workspace administrator, the subject cannot.
+  googleId String? @unique @map("google_id")
   displayName  String @map("display_name")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

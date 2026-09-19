@@ -4,6 +4,7 @@ import { registerRequestSchema } from '@cube-coach/shared';
 import { ApiError } from '../../lib/api-client.js';
 import { fieldErrors } from '../../lib/form-errors.js';
 import { TextField } from '../../components/TextField.js';
+import { GoogleSignInButton } from './GoogleSignInButton.js';
 import { useRegister, useSession } from './use-session.js';
 
 export function RegisterPage(): ReactElement {
@@ -39,6 +40,10 @@ export function RegisterPage(): ReactElement {
     <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center px-6">
       <h1 className="mb-1 text-2xl font-semibold text-slate-900">Create an account</h1>
       <p className="mb-6 text-sm text-slate-500">Start tracking your solves.</p>
+
+      <div className="mb-5 flex flex-col gap-4">
+        <GoogleSignInButton />
+      </div>
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <TextField
@@ -88,6 +93,12 @@ export function RegisterPage(): ReactElement {
           {register.isPending ? 'Creating account…' : 'Create account'}
         </button>
       </form>
+
+      <p className="mt-6 text-center text-sm text-slate-400">
+        <Link to="/" className="underline-offset-4 hover:text-slate-700 hover:underline">
+          Continue without an account
+        </Link>
+      </p>
 
       <p className="mt-6 text-sm text-slate-600">
         Already have an account?{' '}

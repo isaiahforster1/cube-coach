@@ -13,6 +13,7 @@ import {
   useSolveSync,
   useUpdateSolvePenalty,
 } from '../solves/use-solves.js';
+import { useSolveStore } from '../solves/use-solve-store.js';
 import { TimerDisplay } from './TimerDisplay.js';
 import { useTimer, type SolveResult } from './use-timer.js';
 
@@ -23,6 +24,7 @@ export function TimerPage(): ReactElement {
   const saveSolve = useSaveSolve();
   const updatePenalty = useUpdateSolvePenalty();
   const { pendingCount, isSyncing } = useSolveSync();
+  const { isGuest } = useSolveStore();
 
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
   const [scramble, setScramble] = useState<Scramble | null>(null);
@@ -77,6 +79,17 @@ export function TimerPage(): ReactElement {
     updatePenalty.mutate({ id: lastSolve.id, penalty });
   }
 
+  /**
+   * Changing the mode starts again from idle.
+   *
+   * Without this, toggling inspection mid-countdown leaves the machine inspecting
+   * under rules that no longer apply — a state nothing else in the app expects.
+   */
+  const { reset } = timer;
+  useEffect(() => {
+    reset();
+  }, [inspectionEnabled, reset]);
+
   const finished = timer.phase === 'stopped';
 
   return (
@@ -87,7 +100,18 @@ export function TimerPage(): ReactElement {
             <input
               type="checkbox"
               checked={inspectionEnabled}
-              onChange={(event) => setInspectionEnabled(event.target.checked)}
+              onChange={(event) => {
+                setInspectionEnabled(event.target.checked);
+                /**
+                 * Hand the spacebar straight back to the timer.
+                 *
+                 * Clicking a checkbox focuses it, and a focused checkbox owns the space
+                 * key — so the next press toggles the setting again instead of starting
+                 * a solve. The setting flickers on and off, no countdown ever appears,
+                 * and nothing about it suggests what is wrong.
+                 */
+                event.target.blur();
+              }}
               className="size-4"
             />
             Inspection
@@ -133,6 +157,7 @@ export function TimerPage(): ReactElement {
               <p className="text-sm text-slate-500">
                 {formatSolve(lastSolve.durationMs, timer.penalty)} ·{' '}
                 <SaveStatus
+                  isGuest={isGuest}
                   isSaving={saveSolve.isPending}
                   failed={saveSolve.isError}
                   pendingCount={pendingCount}
@@ -165,15 +190,23 @@ export function TimerPage(): ReactElement {
 }
 
 function SaveStatus({
+  isGuest,
   isSaving,
   failed,
   pendingCount,
 }: {
+  isGuest: boolean;
   isSaving: boolean;
   failed: boolean;
   pendingCount: number;
 }): ReactElement {
   if (isSaving) return <span className="text-slate-400">saving…</span>;
+
+  // A guest's solves really are only in this browser. Saying "saved" in green would be
+  // technically true and practically misleading — they will not be there on another
+  // device, and finding that out later is exactly the surprise worth avoiding.
+  if (isGuest) return <span className="text-slate-500">saved on this device</span>;
+
   if (failed || pendingCount > 0) {
     return <span className="text-amber-700">saved on this device only</span>;
   }

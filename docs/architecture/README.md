@@ -41,3 +41,6 @@ reversal destroys the only thing this directory is for.
 | [0008](0008-timer-as-a-pure-state-machine.md)           | The timer is a pure state machine in the shared package   | Accepted |
 | [0009](0009-never-lose-a-solve.md)                      | Never lose a solve                                        | Accepted |
 | [0010](0010-statistics-built-for-diagnosis.md)          | Statistics are built for diagnosis, not just reporting    | Accepted |
+| [0011](0011-css-cube-rendering.md)                      | Render the cube with CSS 3D transforms                    | Accepted |
+| [0012](0012-guest-first.md)                             | The account is optional                                   | Accepted |
+| [0013](0013-google-sign-in.md)                          | Google sign-in, as an option rather than a replacement    | Accepted |

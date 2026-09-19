@@ -34,7 +34,10 @@ export interface UseTimerOptions {
 
 /** Phases where the display changes every frame and needs animating. */
 function isAnimating(phase: TimerPhase): boolean {
-  return phase === 'holding' || phase === 'inspecting' || phase === 'running';
+  // `ready` is included because the inspection countdown is still on screen while
+  // armed. Leaving it out froze that number at whatever it read when the hold
+  // began, which looks like a bug even though the timing was correct.
+  return phase === 'holding' || phase === 'inspecting' || phase === 'running' || phase === 'ready';
 }
 
 /**
@@ -61,6 +64,20 @@ export function useTimer({
 }: UseTimerOptions = {}) {
   const [state, setState] = useState(createInitialState);
   const [frameNow, setFrameNow] = useState(() => now());
+
+  /**
+   * A stable reference to the clock.
+   *
+   * The `now` option defaults to an arrow function, so a caller that does not pass one
+   * hands in a brand new function on every render. Used directly in effect dependencies
+   * that makes every effect tear down and re-run each render — which, while the animation
+   * loop is running, means cancelling and rescheduling the arming timeout sixty times a
+   * second. It still fired at roughly the right moment, but nothing about that is
+   * something to rely on.
+   */
+  const nowRef = useRef(now);
+  nowRef.current = now;
+  const readNow = useCallback(() => nowRef.current(), []);
 
   // Handlers are attached once, so they would otherwise close over the phase as it was
   // on first render. A ref gives them the current value without re-binding listeners on
@@ -89,31 +106,42 @@ export function useTimer({
   useEffect(() => {
     if (state.phase !== 'holding' || state.holdStartedAt === undefined) return;
 
-    const elapsed = now() - state.holdStartedAt;
+    const elapsed = readNow() - state.holdStartedAt;
     const remaining = Math.max(0, config.holdDurationMs - elapsed);
 
     const timeout = setTimeout(() => {
-      dispatch({ type: 'tick', at: now() });
+      dispatch({ type: 'tick', at: readNow() });
     }, remaining);
 
     return () => {
       clearTimeout(timeout);
     };
-  }, [state.phase, state.holdStartedAt, config.holdDurationMs, dispatch, now]);
+  }, [state.phase, state.holdStartedAt, config.holdDurationMs, dispatch, readNow]);
 
   /** Repaint while something is moving. Display only — no state depends on this. */
   useEffect(() => {
     if (!isAnimating(state.phase)) return;
 
+    /**
+     * Refresh the clock immediately, before waiting for a frame.
+     *
+     * `frameNow` is only updated by the animation loop, so on entering a phase it still
+     * holds whatever it read last — possibly from page load, minutes ago. The first
+     * render of an inspection countdown would then compute its remaining time against a
+     * stale timestamp and show a number that is simply wrong, until the next frame
+     * corrected it. In a throttled tab, where frames are rare, it stays wrong.
+     */
+    setFrameNow(readNow());
+
     let frame = requestAnimationFrame(function loop() {
-      setFrameNow(now());
+      setFrameNow(readNow());
       frame = requestAnimationFrame(loop);
     });
 
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [state.phase, now]);
+  }, [state.phase, readNow]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -133,14 +161,14 @@ export function useTimer({
       // Any key stops a running solve — you slap the nearest one. Only space starts one,
       // so ordinary typing and shortcuts do not launch a solve by accident.
       if (running || event.code === 'Space') {
-        dispatch({ type: 'pressDown', at: now() });
+        dispatch({ type: 'pressDown', at: readNow() });
       }
     }
 
     function handleKeyUp(event: KeyboardEvent): void {
       if (isFormControl(event.target)) return;
       if (event.code === 'Space') event.preventDefault();
-      dispatch({ type: 'pressUp', at: now() });
+      dispatch({ type: 'pressUp', at: readNow() });
     }
 
     /**
@@ -178,25 +206,36 @@ export function useTimer({
     onSolveComplete?.({ durationMs, penalty: state.penalty });
   }, [state, onSolveComplete]);
 
+  /**
+   * Stable callbacks, so a caller can depend on them in an effect without it re-running
+   * on every render.
+   */
+  const setPenalty = useCallback(
+    (penalty: Penalty) => {
+      dispatch({ type: 'setPenalty', penalty });
+    },
+    [dispatch],
+  );
+
+  const reset = useCallback(() => {
+    dispatch({ type: 'reset' });
+  }, [dispatch]);
+
   return {
     state,
     phase: state.phase,
     penalty: state.penalty,
     displayMs: displayDurationMs(state, frameNow),
     inspectionRemainingMs: inspectionRemainingMs(state, frameNow),
-    setPenalty: (penalty: Penalty) => {
-      dispatch({ type: 'setPenalty', penalty });
-    },
-    reset: () => {
-      dispatch({ type: 'reset' });
-    },
+    setPenalty,
+    reset,
     /** Touch and mouse support, attached to the timer surface rather than the window. */
     surfaceProps: {
       onPointerDown: () => {
-        dispatch({ type: 'pressDown', at: now() });
+        dispatch({ type: 'pressDown', at: readNow() });
       },
       onPointerUp: () => {
-        dispatch({ type: 'pressUp', at: now() });
+        dispatch({ type: 'pressUp', at: readNow() });
       },
     },
   };

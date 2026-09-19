@@ -7,7 +7,7 @@ solving at the speed you are, and what to practise next.
 
 ## Status
 
-Early development. **M9 complete** — timer, history, and statistics that measure consistency and scramble difficulty, not just speed.
+Early development. **M10 complete** — no account needed: the timer, history, statistics and cube all work as a guest, and your solves come with you if you sign in.
 
 | Milestone | Scope                                                  | State   |
 | --------- | ------------------------------------------------------ | ------- |
@@ -21,8 +21,8 @@ Early development. **M9 complete** — timer, history, and statistics that measu
 | M7        | Solve and session persistence                          | ✅ Done |
 | M8        | History                                                | ✅ Done |
 | M9        | Statistics and personal records                        | ✅ Done |
-| M10       | Interactive cube                                       | Next    |
-| M11       | Algorithm library                                      |         |
+| M10       | Interactive cube                                       | ✅ Done |
+| M11       | Algorithm library                                      | Next    |
 | M12       | Hardening and deployment                               |         |
 
 ## Quick start

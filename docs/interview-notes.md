@@ -1230,3 +1230,222 @@ uncertainty is cheap; being confidently wrong is not.
 
 > "Below a minimum sample I return null and the UI says so. A statistics product that
 > reports noise as insight is worse than one that reports nothing."
+
+---
+
+## M10 — Interactive cube
+
+### How do you draw a 3D cube without a 3D library?
+
+Six `div` elements, each rotated to face a different direction and pushed outward from a
+shared centre with `translateZ`. The container gets `perspective`, which is what makes
+`translateZ` read as depth rather than scale, and rotating the container rotates the whole
+assembly.
+
+Each face is a 3×3 CSS grid of coloured squares. That is the entire technique.
+
+> "Six planes, each rotated and translated out from the centre, inside a container with
+> perspective. Roughly sixty lines and no dependency."
+
+### What can this approach not do?
+
+Animate a layer turning — and the reason is structural rather than a matter of effort.
+
+The cube is drawn as six **faces**, but a turn moves **pieces**, and the pieces in one
+layer belong to five different faces at once. Animating a turn means splitting the model
+into 26 individual cubies and re-parenting the nine that are moving, which is the point
+where this stops being sixty readable lines and Three.js starts earning its keep.
+
+So: this renders positions, and switching between them is instantaneous. That is enough
+for a playground and for showing algorithm cases, and it is not enough for solve replay.
+
+> "Faces are fine for showing a position. A turn moves pieces across five faces at once,
+> so animating it needs a piece-based model — that's when I'd bring in Three.js."
+
+### Why does the component take a cube state instead of a scramble?
+
+Because it makes the renderer a **seam**. `CubeView` receives a `CubeState` and draws it;
+it knows nothing about moves, scrambles or how the position was reached.
+
+That means swapping CSS for Three.js later touches one file, and nothing else in the
+application notices. Introducing that boundary now cost nothing and makes a decision that
+was deferred cheap to revisit — which is the whole reason ADR-0001 was comfortable
+deferring it.
+
+### Why is colour in the interface rather than the engine?
+
+The engine labels every sticker by the _face_ it belongs to — `U`, `R`, `F` — never by
+colour. The mapping to white, red and green lives in one file in the web app.
+
+Two payoffs. The engine stays independent of any particular colour scheme, so a Japanese-
+scheme cube or a colour-blind-friendly palette is a one-file change. And the engine's
+tests never have to talk about colours, which would be an irrelevant detail in an
+assertion about cube mechanics.
+
+### What does `backface-visibility: hidden` do, and why is it needed?
+
+By default a CSS element is visible from behind, so the three faces pointing away from the
+viewer show _through_ the three facing it and the cube looks like a wireframe.
+
+Hiding backfaces means each face is drawn only when its front is towards the camera, which
+is what makes it read as a solid object.
+
+### Why derive the cube position from the move list instead of storing it?
+
+The playground keeps the list of moves applied as the single source of truth and computes
+the position from it on every render.
+
+Undo then becomes "drop the last move", and the displayed position can never disagree with
+the history that produced it. Storing both would create two things that must be kept in
+step, which is a bug waiting for the first code path that updates one and forgets the
+other.
+
+> "The move list is the state; the position is derived. Undo is dropping an element, and
+> the two can't drift apart because there's only one of them."
+
+### How do you test something visual in a unit test?
+
+Not by comparing pixels. The test asserts on structure: 54 stickers exist, each face
+element contains exactly nine stickers of its own colour when solved, and a scrambled cube
+still has nine of each colour overall because moves permute stickers rather than create
+them.
+
+The per-face test is the valuable one. It is the check that the CSS transforms agree with
+the engine's facelet ordering — an assumption that was easy to make and would have been
+easy to get wrong.
+
+Beyond that, the honest answer is that "does it look like a cube?" needs a human or a
+screenshot, and no assertion substitutes for it.
+
+---
+
+## Guest mode, Google sign-in and tooltips
+
+### How do you make an account optional without duplicating the whole app?
+
+An interface with two implementations. `SolveStore` describes what storing solves means —
+list a page, list all, create, set a penalty, delete, restore — and there are two: one
+backed by the API, one by `localStorage`. A single hook picks between them from the
+session.
+
+Everything else depends on the interface and never learns which it has. Guest mode is one
+branch in one place, rather than an "are we signed in?" check threaded through every
+component — which is the version that eventually gets it wrong somewhere.
+
+It was a small change precisely because the features already depended on hooks rather than
+calling `fetch` directly. That indirection looked like ceremony when it was written and
+paid for itself here.
+
+> "One interface, two implementations, chosen once. Everything downstream is unchanged,
+> because nothing downstream ever knew where solves were kept."
+
+### How do guests get statistics without a server?
+
+The same way the server does. `buildStatsSummary` is a pure function in
+`packages/shared`, so the browser runs the identical calculation over local solves.
+
+This is the payoff from writing the statistics as pure functions rather than as SQL or as
+API logic. A guest and an account holder cannot be shown different numbers for the same
+solves, because there is only one implementation of the rules.
+
+### Why not create a throwaway account automatically for each visitor?
+
+It would give every visitor real server-side storage with no form to fill in, which is
+genuinely tempting.
+
+But it writes a database row for everyone who passes by, needs a policy for reaping them,
+and quietly creates an account for someone who did not ask for one. Keeping guest data in
+the guest's browser is honest about what is happening.
+
+### What makes migrating guest solves safe?
+
+Creating a solve is idempotent on a client-generated id. So uploading can be retried
+freely — a migration interrupted half way and resumed later cannot produce duplicates.
+
+The local copy is cleared **last**, only after every solve has been accepted. If the
+upload fails, the solves stay exactly where they are and the next sign-in tries again. The
+failure mode is "tries again later", never "deleted the only copy".
+
+> "The upload is idempotent, so retrying is free, and the local copy is deleted last. The
+> worst case is that it happens later, not that anything is lost."
+
+### Why does the interface say "saved on this device" rather than "saved"?
+
+Because a guest's solves exist in exactly one browser. A green tick saying "saved" would
+be technically true and practically misleading, and the misunderstanding only surfaces
+when they open another device and find nothing there.
+
+Being honest about the limits of a guarantee costs a few words. Being wrong about it costs
+trust at the worst possible moment.
+
+### Why is the sign-in link so understated?
+
+Because the product's job is to be a timer, and someone who wants to try a timer should be
+able to try a timer. A modal on arrival, a banner, or a counter nagging about registering
+all interrupt the thing they came for in order to ask for something they have no reason to
+want yet.
+
+The account becomes worth having once there are solves worth keeping. At that point the
+link is where you would look for it.
+
+### Why does Google sign-in use the authorization code flow rather than the implicit flow?
+
+The implicit flow returns the access token straight to the browser, where anything running
+on the page can read it. The authorization code flow returns a short-lived code, which the
+server exchanges for a token using a secret the browser never sees.
+
+The client secret stays on the server, the token never touches the page, and the session
+the user ends up with is our own cookie.
+
+> "Implicit hands the token to the browser. The code flow keeps the exchange server-side,
+> so the secret and the token never reach the page."
+
+### What is the `state` parameter for?
+
+Cross-site request forgery. Without it, an attacker could send someone a crafted callback
+URL carrying the attacker's own authorization code — and the victim would silently end up
+signed into the attacker's account, then save their solves there.
+
+A random value goes into a short-lived cookie and into the URL, and the callback refuses
+to proceed unless they match.
+
+### Why match Google accounts on the subject rather than the email?
+
+The subject is Google's stable identifier for an account. An email address is not stable —
+a workspace administrator can reassign one.
+
+Matching on email alone would mean whoever holds an address today inherits the account of
+whoever held it before.
+
+### Then why is linking by email safe at all?
+
+Because Google is asked whether the address is **verified**, and an unverified one is
+refused outright.
+
+This is the single check the whole linking design rests on. Without it, anyone who could
+create a Google account claiming someone else's address could take over their CubeCoach
+account — the classic way this integration is got wrong. There are two tests covering it,
+including one asserting that an unverified email cannot be linked to an existing account.
+
+> "Link by email only when Google says it's verified. Otherwise anyone who can create a
+> Google account with your address owns your account."
+
+### Why hide the Google button instead of showing it and failing?
+
+An option that fails when pressed looks broken, and the user cannot tell whether the fault
+is theirs. The server reports which providers are configured, and the client renders only
+those.
+
+### Why is a tooltip a button rather than the `title` attribute?
+
+`title` looks like the easy answer and fails three groups of people: it never appears for
+keyboard users, it never appears on touch devices, and screen readers treat it
+inconsistently.
+
+A `<button>` is focusable, activates on tap, opens on hover _and_ focus, closes on Escape,
+and can be linked to its explanation with `aria-describedby` so assistive technology reads
+it as part of the control rather than as stray text.
+
+The first version toggled on click, which meant a mouse user — who has already hovered by
+the time the click lands — closed the tip they had just opened. It now opens on click and
+dismisses on Escape, on tapping elsewhere, or on the pointer leaving.

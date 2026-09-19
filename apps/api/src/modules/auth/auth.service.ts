@@ -2,6 +2,7 @@ import type { User } from '@prisma/client';
 import type { LoginRequest, PublicUser, RegisterRequest } from '@cube-coach/shared';
 import { ApiError } from '../../plugins/error-handler.js';
 import type { AuthRepository } from './auth.repository.js';
+import type { GoogleProfile } from './google.js';
 import { DUMMY_HASH_PROMISE, hashPassword, verifyPassword } from './password.js';
 import {
   createSessionToken,
@@ -67,6 +68,49 @@ export function createAuthService(repository: AuthRepository) {
         // accounts to attack.
         throw new ApiError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect');
       }
+
+      return { user, token: await this.startSession(user.id, userAgent) };
+    },
+
+    /**
+     * Sign in with Google, creating or linking an account as needed.
+     *
+     * Three cases, in order: an account already linked to this Google subject; an account
+     * with the same email, which gets linked; or a new account.
+     *
+     * Linking by email is only safe because Google is asked whether the address is
+     * verified, and an unverified one is refused outright. Without that check, anyone who
+     * could create a Google account claiming someone else's address could take over their
+     * CubeCoach account — which is the classic way this integration goes wrong.
+     */
+    async signInWithGoogle(
+      profile: GoogleProfile,
+      userAgent: string | null,
+    ): Promise<{ user: User; token: string }> {
+      if (!profile.emailVerified) {
+        throw new ApiError(
+          403,
+          'GOOGLE_EMAIL_UNVERIFIED',
+          'Your Google account does not have a verified email address',
+        );
+      }
+
+      const linked = await repository.findUserByGoogleId(profile.sub);
+      if (linked !== null) {
+        return { user: linked, token: await this.startSession(linked.id, userAgent) };
+      }
+
+      const existing = await repository.findUserByEmail(profile.email);
+      if (existing !== null) {
+        const user = await repository.linkGoogleAccount(existing.id, profile.sub);
+        return { user, token: await this.startSession(user.id, userAgent) };
+      }
+
+      const user = await repository.createGoogleUser({
+        email: profile.email,
+        displayName: profile.name,
+        googleId: profile.sub,
+      });
 
       return { user, token: await this.startSession(user.id, userAgent) };
     },

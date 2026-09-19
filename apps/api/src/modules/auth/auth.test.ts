@@ -90,7 +90,9 @@ describe('POST /auth/register', () => {
 
     expect(user.passwordHash).not.toBe(CREDENTIALS.password);
     expect(user.passwordHash).not.toContain(CREDENTIALS.password);
-    expect(user.passwordHash.startsWith('$argon2id$')).toBe(true);
+    // Non-null for an account registered with a password; Google-only accounts have none.
+    expect(user.passwordHash).not.toBeNull();
+    expect(user.passwordHash?.startsWith('$argon2id$')).toBe(true);
   });
 
   it('rejects an email that is already registered', async () => {
@@ -308,5 +310,39 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+describe('accounts without a password', () => {
+  /**
+   * An account created through Google has no password hash at all. Signing in with a
+   * password must fail the same way a wrong password does — same status, same message,
+   * and the same work done, so the response cannot be used to discover which accounts
+   * use Google.
+   */
+  it('cannot be signed into with a password, and says nothing about why', async () => {
+    await context.prisma.user.create({
+      data: {
+        email: 'google-user@example.com',
+        displayName: 'Google User',
+        googleId: 'google-subject-123',
+        passwordHash: null,
+      },
+    });
+
+    const googleOnly = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'google-user@example.com', password: 'any-password-at-all' },
+    });
+
+    const noSuchUser = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'nobody@example.com', password: 'any-password-at-all' },
+    });
+
+    expect(googleOnly.statusCode).toBe(401);
+    expect(googleOnly.json()).toEqual(noSuchUser.json());
   });
 });

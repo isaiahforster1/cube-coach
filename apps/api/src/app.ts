@@ -8,6 +8,8 @@ import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 import { createAuthService } from './modules/auth/auth.service.js';
+import { createGoogleOAuth } from './modules/auth/google.js';
+import { registerAuthProviderRoutes, registerGoogleRoutes } from './modules/auth/google.routes.js';
 import { createPracticeSessionsRepository } from './modules/practice-sessions/practice-sessions.repository.js';
 import { registerPracticeSessionRoutes } from './modules/practice-sessions/practice-sessions.routes.js';
 import { createPracticeSessionsService } from './modules/practice-sessions/practice-sessions.service.js';
@@ -98,6 +100,25 @@ export async function buildApp({
 
   const authService = createAuthService(createAuthRepository(prisma));
 
+  /**
+   * Google sign-in is only wired up when it is configured.
+   *
+   * An option that appears and then fails when pressed is worse than one that is absent,
+   * so the routes and the button both depend on the credentials existing.
+   */
+  const googleConfig =
+    config.GOOGLE_CLIENT_ID !== undefined &&
+    config.GOOGLE_CLIENT_SECRET !== undefined &&
+    config.GOOGLE_REDIRECT_URI !== undefined
+      ? {
+          clientId: config.GOOGLE_CLIENT_ID,
+          clientSecret: config.GOOGLE_CLIENT_SECRET,
+          redirectUri: config.GOOGLE_REDIRECT_URI,
+        }
+      : null;
+
+  const google = googleConfig === null ? null : createGoogleOAuth(googleConfig);
+
   const practiceSessionsRepository = createPracticeSessionsRepository(prisma);
   const practiceSessionsService = createPracticeSessionsService(practiceSessionsRepository);
   const solvesRepository = createSolvesRepository(prisma);
@@ -117,6 +138,8 @@ export async function buildApp({
   await app.register(
     async (instance) => {
       registerAuthRoutes(instance, authService, limits?.credentialMax ?? 10);
+      registerAuthProviderRoutes(instance, google !== null);
+      if (google !== null) registerGoogleRoutes(instance, authService, google);
       registerPracticeSessionRoutes(instance, practiceSessionsService);
       registerSolveRoutes(instance, solvesService);
       registerStatsRoutes(instance, statsService);

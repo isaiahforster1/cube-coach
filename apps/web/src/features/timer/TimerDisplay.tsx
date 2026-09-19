@@ -24,11 +24,20 @@ export function TimerDisplay({
   penalty,
   inspectionRemainingMs,
 }: TimerDisplayProps): ReactElement {
-  const inspecting =
-    phase === 'inspecting' || (phase === 'holding' && inspectionRemainingMs !== undefined);
+  /**
+   * Show the inspection countdown for the whole of inspection, including while the timer
+   * is being armed.
+   *
+   * Previously `ready` fell through to the solve time, so the countdown was replaced by
+   * `0.00` at the exact moment a cuber most needs to know how much inspection they have
+   * used — and a zero in that position reads as a running timer, not as an absence.
+   */
+  const showingInspection =
+    inspectionRemainingMs !== undefined &&
+    (phase === 'inspecting' || phase === 'holding' || phase === 'ready');
 
-  const text = inspecting
-    ? formatInspection(inspectionRemainingMs ?? 0)
+  const text = showingInspection
+    ? formatInspection(inspectionRemainingMs)
     : phase === 'stopped'
       ? formatSolve(displayMs, penalty)
       : formatDuration(displayMs);
@@ -57,6 +66,10 @@ export function TimerDisplay({
 /**
  * Inspection counts down in whole seconds, then shows the penalty once it overruns —
  * a cuber needs to know they have crossed into +2 territory before starting, not after.
+ */
+/**
+ * Inspection counts down in whole seconds, then names the penalty once it overruns — a
+ * cuber needs to know they have crossed into +2 territory before starting, not after.
  */
 function formatInspection(remainingMs: number): string {
   if (remainingMs > 0) return Math.ceil(remainingMs / 1000).toString();

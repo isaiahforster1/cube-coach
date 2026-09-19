@@ -29,6 +29,17 @@ const environmentSchema = z.object({
    */
   WEB_ORIGIN: z.string().default('http://localhost:5173'),
 
+  /**
+   * Google sign-in credentials, all optional.
+   *
+   * When they are absent the routes are not registered and the client does not offer the
+   * button at all — better than showing an option that fails when pressed. They come from
+   * a Google Cloud OAuth client, which has to be created by hand.
+   */
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().optional(),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
