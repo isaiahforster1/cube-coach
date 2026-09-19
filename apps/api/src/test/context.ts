@@ -15,6 +15,10 @@ export interface TestContext {
 export interface CreateTestContextOptions {
   /** Lower these to assert that the rate limiter actually fires. */
   readonly rateLimit?: { readonly max?: number; readonly credentialMax?: number };
+  /** A directory of built client files, for the tests that cover serving them. */
+  readonly webRoot?: string;
+  /** Run as production would, for the headers that only appear there. */
+  readonly production?: boolean;
 }
 
 /**
@@ -34,7 +38,7 @@ export async function createTestContext(
 
   const config = loadConfig({
     ...process.env,
-    NODE_ENV: 'test',
+    NODE_ENV: options.production === true ? 'production' : 'test',
     DATABASE_URL: databaseUrl,
     // Tests should not print application logs unless something is being debugged.
     LOG_LEVEL: process.env['TEST_LOG_LEVEL'] ?? 'silent',
@@ -50,6 +54,7 @@ export async function createTestContext(
       max: options.rateLimit?.max ?? 100_000,
       credentialMax: options.rateLimit?.credentialMax ?? 100_000,
     },
+    ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
   });
   await app.ready();
 

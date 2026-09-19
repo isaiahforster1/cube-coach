@@ -20,6 +20,8 @@ import { registerStatsRoutes } from './modules/stats/stats.routes.js';
 import { createStatsService } from './modules/stats/stats.service.js';
 import { registerAuthentication } from './plugins/authenticate.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
+import { registerSecurityHeaders } from './plugins/security-headers.js';
+import { registerWebClient } from './plugins/web-client.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -43,6 +45,13 @@ export interface BuildAppOptions {
     readonly max?: number;
     readonly credentialMax?: number;
   };
+  /**
+   * Where the built web client lives, when this process is serving it too.
+   *
+   * Absent in development, where Vite serves the client on its own port, and in tests,
+   * which have no build to serve.
+   */
+  readonly webRoot?: string;
 }
 
 /**
@@ -58,6 +67,7 @@ export async function buildApp({
   config,
   prisma,
   rateLimit: limits,
+  webRoot,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -72,7 +82,14 @@ export async function buildApp({
     // Trusting it in development would let any client spoof its own IP — and rate
     // limiting keys on that IP.
     trustProxy: config.NODE_ENV === 'production',
+    // A solve payload is a few hundred bytes. Anything approaching this is a mistake
+    // or an attempt, and rejecting it early costs nothing.
+    bodyLimit: 64 * 1024,
   });
+
+  const isProduction = config.NODE_ENV === 'production';
+
+  await registerSecurityHeaders(app, { isProduction });
 
   app.decorate('prisma', prisma);
   app.decorate('config', config);
@@ -125,7 +142,11 @@ export async function buildApp({
   const statsService = createStatsService(solvesRepository);
   const solvesService = createSolvesService(solvesRepository, practiceSessionsRepository);
 
-  registerErrorHandler(app, config.NODE_ENV === 'production');
+  // Registered before the error handler, which needs to know whether an unmatched page
+  // request is a client route or a genuine 404.
+  const servesWebClient = webRoot === undefined ? false : await registerWebClient(app, webRoot);
+
+  registerErrorHandler(app, { isProduction, servesWebClient });
   registerAuthentication(app, authService);
   registerHealthRoutes(app);
   // Everything except the health probes lives under a version prefix. Versioning

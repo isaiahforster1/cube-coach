@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
+import { wantsAppShell } from './web-client.js';
 
 /**
  * One error shape for the entire API:
@@ -32,8 +33,28 @@ export class ApiError extends Error {
   }
 }
 
-export function registerErrorHandler(app: FastifyInstance, isProduction: boolean): void {
+export interface ErrorHandlerOptions {
+  readonly isProduction: boolean;
+  /**
+   * Whether this process is also serving the web client.
+   *
+   * When it is, an unmatched page request is a client route rather than a mistake, and
+   * gets the app shell. Fastify allows only one not-found handler per instance, so the
+   * two concerns share one rather than fighting over it.
+   */
+  readonly servesWebClient?: boolean;
+}
+
+export function registerErrorHandler(
+  app: FastifyInstance,
+  { isProduction, servesWebClient = false }: ErrorHandlerOptions,
+): void {
   app.setNotFoundHandler((request, reply) => {
+    if (servesWebClient && wantsAppShell(request)) {
+      void reply.sendFile('index.html');
+      return;
+    }
+
     void reply.status(404).send({
       error: {
         code: 'NOT_FOUND',

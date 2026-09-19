@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { parseAlgorithm, type Scramble } from '@cube-coach/shared';
 import { ScrambleView } from './ScrambleView.js';
 
-function scrambleOf(notation: string): Scramble {
-  return { moves: parseAlgorithm(notation), notation, quality: 'random-move' };
+function scrambleOf(notation: string, quality: Scramble['quality'] = 'random-state'): Scramble {
+  return { moves: parseAlgorithm(notation), notation, quality };
 }
 
 beforeEach(() => {
@@ -147,5 +147,34 @@ describe('scramble difficulty label', () => {
   it('shows no rating while there is no scramble', () => {
     const { container } = render(<ScrambleView scramble={null} />);
     expect(within(container).queryByText(/^(Easy|Standard|Hard)$/u)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The solver that produces competition-quality scrambles runs in a worker, and a worker
+ * is not something a web page is guaranteed to get. When it cannot start, the timer
+ * falls back to random turns — which are fine to practise on and are not the same thing,
+ * so the difference is stated rather than hidden.
+ */
+describe('scramble quality', () => {
+  it('says nothing when the scrambles are the proper kind', () => {
+    render(<ScrambleView scramble={scrambleOf('R U', 'random-state')} />);
+
+    expect(screen.queryByText(/practice scramble/iu)).not.toBeInTheDocument();
+  });
+
+  it('marks a fallback scramble as a practice one', () => {
+    render(<ScrambleView scramble={scrambleOf('R U', 'random-move')} />);
+
+    expect(screen.getByText(/practice scramble/iu)).toBeInTheDocument();
+  });
+
+  it('explains what a practice scramble is rather than just labelling it', async () => {
+    const user = userEvent.setup();
+    render(<ScrambleView scramble={scrambleOf('R U', 'random-move')} />);
+
+    await user.click(screen.getByRole('button', { name: /what is a practice scramble/iu }));
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/some positions come up more often/iu);
   });
 });

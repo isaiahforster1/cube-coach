@@ -6,7 +6,7 @@ import { ApiError, registerErrorHandler } from './error-handler.js';
 /** A small app with deliberately failing routes, so each branch can be exercised. */
 function buildFailingApp(isProduction: boolean): FastifyInstance {
   const app = Fastify({ logger: false });
-  registerErrorHandler(app, isProduction);
+  registerErrorHandler(app, { isProduction });
 
   app.get('/api-error', () => {
     throw new ApiError(409, 'ALREADY_EXISTS', 'That already exists', { field: 'email' });

@@ -5,7 +5,18 @@
  * decided once rather than remembered at every call site.
  */
 
-const API_BASE_URL = import.meta.env['VITE_API_URL'] ?? 'http://localhost:3000/api/v1';
+/**
+ * Relative by default, because the API and the client share an origin.
+ *
+ * In production one process serves both (ADR-0017), and in development Vite proxies
+ * `/api` through to the API on its own port — so the browser sees a same-origin request
+ * either way. That is not tidiness: the session cookie is `sameSite: 'lax'` and would
+ * not travel on a cross-site request at all, and a setup where development is
+ * same-origin and production is not is one where the difference is found in production.
+ *
+ * The override exists for pointing a local client at a deployed API.
+ */
+export const API_BASE_URL = import.meta.env['VITE_API_URL'] ?? '/api/v1';
 
 /** An error the API returned deliberately, in its documented shape. */
 export class ApiError extends Error {

@@ -1,6 +1,7 @@
 import { useId, type ReactElement } from 'react';
 import type { Scramble } from '@cube-coach/shared';
 import { Collapse } from '../../components/Collapse.js';
+import { InfoTip } from '../../components/InfoTip.js';
 import {
   ChevronDownIcon,
   NextIcon,
@@ -50,6 +51,26 @@ export function ScrambleView({ scramble }: { scramble: Scramble | null }): React
         </p>
         {rating !== null && <ScrambleDifficultyBadge rating={rating} />}
       </div>
+
+      {/*
+        Say so when the scramble is the weaker kind.
+
+        Random-move scrambles do not produce every position equally often, which is why
+        competitions do not use them. That only matters if you know you are getting
+        them — presenting one as though it were competition quality is the dishonest
+        option, and silence is what makes it dishonest.
+      */}
+      {scramble?.quality === 'random-move' && (
+        <p className="flex items-center gap-1.5 text-xs text-amber-700" role="status">
+          Practice scramble
+          <InfoTip term="a practice scramble">
+            The solver that makes competition-quality scrambles could not start in this browser, so
+            these are random turns instead. They are perfectly good to practise on, but some
+            positions come up more often than others, so times are not strictly comparable with
+            official ones.
+          </InfoTip>
+        </p>
+      )}
 
       <button
         type="button"

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createPrismaClient } from './db.js';
@@ -14,7 +15,23 @@ try {
 
 const config = loadConfig();
 const prisma = createPrismaClient(config.DATABASE_URL);
-const app = await buildApp({ config, prisma });
+/**
+ * In production this process serves the web client as well, from one origin, so the
+ * session cookie stays same-site and CORS is not involved at all. The default path is
+ * resolved from this file rather than from the working directory, which a platform may
+ * set to anything.
+ */
+const webRoot =
+  config.WEB_ROOT ??
+  (config.NODE_ENV === 'production'
+    ? fileURLToPath(new URL('../../web/dist', import.meta.url))
+    : undefined);
+
+const app = await buildApp({
+  config,
+  prisma,
+  ...(webRoot === undefined ? {} : { webRoot }),
+});
 
 /**
  * On SIGTERM a platform gives the process a few seconds before killing it. Using them

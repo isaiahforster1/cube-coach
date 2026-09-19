@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
-  createRandomStateScrambleProvider,
+  createResilientScrambleProvider,
   DEFAULT_TIMER_CONFIG,
   formatSolve,
   type Penalty,
@@ -18,7 +18,7 @@ import { ScrambleView } from '../scramble/ScrambleView.js';
 import { TimerDisplay } from './TimerDisplay.js';
 import { useTimer, type SolveResult } from './use-timer.js';
 
-const scrambles = createRandomStateScrambleProvider();
+const scrambles = createResilientScrambleProvider();
 
 export function TimerPage(): ReactElement {
   const { practiceSessionId } = useCurrentPracticeSession();

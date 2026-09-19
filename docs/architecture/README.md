@@ -47,3 +47,4 @@ reversal destroys the only thing this directory is for.
 | [0014](0014-animate-turns-with-pieces.md)               | Animate turns by drawing pieces, not faces                | Accepted                                                |
 | [0015](0015-scramble-difficulty-label.md)               | Label scramble difficulty by optimal cross length         | Accepted                                                |
 | [0016](0016-cases-are-positions.md)                     | A last-layer case is a position, not an algorithm         | Accepted                                                |
+| [0017](0017-one-origin-in-production.md)                | The API serves the web client, from one origin            | Accepted                                                |

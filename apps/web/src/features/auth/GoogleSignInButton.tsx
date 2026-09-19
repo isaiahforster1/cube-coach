@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
+import { API_BASE_URL } from '../../lib/api-client.js';
 import { useAuthProviders } from './use-auth-providers.js';
-
-const API_BASE_URL = import.meta.env['VITE_API_URL'] ?? 'http://localhost:3000/api/v1';
 
 /**
  * Starts the Google flow.

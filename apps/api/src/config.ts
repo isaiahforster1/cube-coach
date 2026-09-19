@@ -40,6 +40,14 @@ const environmentSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
 
+  /**
+   * Where the built web client lives, for the production server that hosts both.
+   *
+   * Left unset in development, where Vite serves the client on its own port. See
+   * ADR-0017 for why they share an origin in production.
+   */
+  WEB_ROOT: z.string().optional(),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
