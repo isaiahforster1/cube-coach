@@ -1,33 +1,38 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactElement,
 } from 'react';
-import { FACELETS_PER_FACE, FACES, isSolved, type CubeState, type Face } from '@cube-coach/shared';
+import { FACES, isSolved, type CubeState, type Face, type Move } from '@cube-coach/shared';
 import { FACE_COLOURS, FACE_NAMES } from './colours.js';
+import { faceOf, isInLayer, layerTransform, PIECES, positionKey, type Piece } from './geometry.js';
+
+/** A move caught part-way through, for animating a turn. */
+export interface PartialTurn {
+  readonly move: Move;
+  /** Degrees turned so far. Signed, so a prime turn winds the other way. */
+  readonly angle: number;
+}
 
 export interface CubeViewProps {
   readonly state: CubeState;
   /** Pixel size of one edge of the cube. */
   readonly size?: number;
   readonly label?: string;
+  /**
+   * A turn in progress. The cube draws `state` with this layer rotated, so at the
+   * move's full angle it looks exactly like the position after the move.
+   */
+  readonly turn?: PartialTurn | null;
 }
 
-/**
- * How each face is rotated into place.
- *
- * These happen to line up exactly with the engine's facelet order, which is a small piece
- * of luck worth stating: each CSS face reads left-to-right and top-to-bottom as seen from
- * outside the cube, and that is precisely the convention `CubeState` uses. So sticker `n`
- * of a face goes straight into cell `n` with no translation layer in between.
- *
- * The one to check if this ever looks wrong is U: after `rotateX(90deg)` the top of the
- * element points towards the back of the cube, which is exactly how the engine indexes
- * the U face.
- */
+/** How each face of a small cube is rotated into place. */
 const FACE_TRANSFORMS: Record<Face, string> = {
   U: 'rotateX(90deg)',
   D: 'rotateX(-90deg)',
@@ -39,15 +44,31 @@ const FACE_TRANSFORMS: Record<Face, string> = {
 
 const ROTATION_STEP = 15;
 
+/** The dark plastic between the stickers, and the inside of the cube. */
+const BODY = '#0f172a';
+
 /**
- * A cube drawn with CSS 3D transforms: six planes pushed out from a common centre.
+ * A cube drawn with CSS 3D transforms, as 26 small cubes rather than six flat faces.
  *
- * No 3D library. ADR-0001 chose this deliberately — it is a few dozen lines, has no
- * dependency, and renders a position perfectly well. What it cannot do comfortably is
- * animate a single layer turning, which needs pieces rather than faces. That is the point
- * at which Three.js earns its place, and it is not needed to show a position.
+ * Six faces would be less code and would render a position perfectly well — which is
+ * what this was originally. It cannot animate a turn, though: turning R moves nine
+ * *pieces* together, and those nine pieces own stickers on five different faces of the
+ * engine's array. There is no transform you can apply to a flat face that does the
+ * right thing to a third of it.
+ *
+ * Built from pieces, a turn becomes trivial: put the nine pieces of the layer into a
+ * wrapper and rotate the wrapper. Everything else is untouched and the browser
+ * composites it.
+ *
+ * The join at the end of a turn is the part worth understanding. While a turn animates,
+ * this draws the position *before* the move with one layer rotated part-way. At the full
+ * angle that is identical to drawing the position *after* the move with nothing rotated,
+ * because the stickers in the layer have landed exactly where the engine says they go.
+ * So when the animation finishes the parent swaps in the new state and drops the
+ * rotation, and nothing visibly changes. The animation is decoration; the engine remains
+ * the only authority on where stickers actually are.
  */
-export function CubeView({ state, size = 180, label }: CubeViewProps): ReactElement {
+export function CubeView({ state, size = 180, label, turn = null }: CubeViewProps): ReactElement {
   const [rotation, setRotation] = useState({ x: -25, y: -35 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOrigin = useRef<{ x: number; y: number; rotX: number; rotY: number } | null>(null);
@@ -112,6 +133,17 @@ export function CubeView({ state, size = 180, label }: CubeViewProps): ReactElem
     setRotation((current) => ({ x: current.x + delta.x, y: current.y + delta.y }));
   }, []);
 
+  // Splitting the pieces on every frame of a turn would be wasted work; the split only
+  // changes when the move does.
+  const turningFace = turn === null ? null : faceOf(turn.move);
+  const { still, turning } = useMemo(() => {
+    if (turningFace === null) return { still: PIECES, turning: [] as readonly Piece[] };
+    return {
+      still: PIECES.filter((piece) => !isInLayer(piece.position, turningFace)),
+      turning: PIECES.filter((piece) => isInLayer(piece.position, turningFace)),
+    };
+  }, [turningFace]);
+
   const describedState = label ?? (isSolved(state) ? 'Solved cube' : 'Scrambled cube');
 
   return (
@@ -150,45 +182,96 @@ export function CubeView({ state, size = 180, label }: CubeViewProps): ReactElem
           transition: isDragging ? 'none' : 'transform 120ms ease-out',
         }}
       >
-        {FACES.map((face, faceIndex) => (
+        {still.map((piece) => (
+          <Cubie key={positionKey(piece.position)} piece={piece} state={state} size={size} />
+        ))}
+
+        {turn !== null && (
           <div
-            key={face}
-            data-face={face}
+            data-testid="turning-layer"
+            data-move={turn.move}
             style={{
               position: 'absolute',
-              width: size,
-              height: size,
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: size * 0.02,
-              padding: size * 0.02,
-              background: '#0f172a',
-              borderRadius: size * 0.06,
-              transform: `${FACE_TRANSFORMS[face]} translateZ(${size / 2}px)`,
-              // Without this the far faces show through the near ones and the cube looks
-              // like a wireframe.
-              backfaceVisibility: 'hidden',
+              inset: 0,
+              transformStyle: 'preserve-3d',
+              transform: layerTransform(turn.move, turn.angle),
             }}
           >
-            {Array.from({ length: FACELETS_PER_FACE }, (_, cell) => {
-              const sticker = state[faceIndex * FACELETS_PER_FACE + cell] as Face | undefined;
-              return (
-                <div
-                  key={cell}
-                  data-sticker={sticker}
-                  style={{
-                    background: sticker === undefined ? '#1e293b' : FACE_COLOURS[sticker],
-                    borderRadius: size * 0.04,
-                  }}
-                />
-              );
-            })}
+            {turning.map((piece) => (
+              <Cubie key={positionKey(piece.position)} piece={piece} state={state} size={size} />
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
 }
+
+/**
+ * One of the 26 small cubes.
+ *
+ * Memoised because a turn re-renders the cube on every animation frame while only the
+ * wrapper's transform actually changes. Without this, sixty times a second React would
+ * walk 26 pieces and 156 faces to conclude that none of them had changed.
+ */
+const Cubie = memo(function Cubie({
+  piece,
+  state,
+  size,
+}: {
+  piece: Piece;
+  state: CubeState;
+  size: number;
+}): ReactElement {
+  const unit = size / 3;
+  // A little smaller than its cell, which leaves the dark gaps a real cube has — and
+  // means the sides of the pieces show properly once a layer starts to turn.
+  const body = unit * 0.94;
+  const { x, y, z } = piece.position;
+
+  function stickerOn(face: Face): Face | null {
+    const placement = piece.stickers.find((candidate) => candidate.face === face);
+    if (placement === undefined) return null;
+    return (state[placement.facelet] ?? null) as Face | null;
+  }
+
+  const style: CSSProperties = {
+    position: 'absolute',
+    width: body,
+    height: body,
+    left: (size - body) / 2,
+    top: (size - body) / 2,
+    transformStyle: 'preserve-3d',
+    // Screen y points down and the cube's points up, hence the negation.
+    transform: `translate3d(${x * unit}px, ${-y * unit}px, ${z * unit}px)`,
+  };
+
+  return (
+    <div style={style} data-piece={positionKey(piece.position)}>
+      {FACES.map((face) => {
+        const sticker = stickerOn(face);
+        return (
+          <div
+            key={face}
+            {...(sticker === null ? {} : { 'data-sticker': sticker, 'data-face': face })}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: sticker === null ? BODY : FACE_COLOURS[sticker],
+              // The sticker sits inside a dark border, which is what gives a real cube
+              // its outlined look.
+              border: sticker === null ? 'none' : `${Math.max(1, body * 0.06)}px solid ${BODY}`,
+              borderRadius: body * 0.16,
+              transform: `${FACE_TRANSFORMS[face]} translateZ(${body / 2}px)`,
+              // Without this you see the inside of the far pieces through the near ones.
+              backfaceVisibility: 'hidden',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+});
 
 /** A text description of the cube, for assistive technology and for tests. */
 export function describeCube(state: CubeState): string {

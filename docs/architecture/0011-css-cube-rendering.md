@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted — 2026-09-18
+Superseded by [ADR-0014](0014-animate-turns-with-pieces.md) — 2026-09-19.
+
+The choice of CSS over Three.js stands. What changed is the model underneath it: the cube
+is now drawn as 26 pieces rather than six faces, which is what made animated turns
+possible without a 3D library. The limitation described below under _Made harder_ is no
+longer true, and the prediction that Three.js would be needed was wrong.
+
+Originally accepted — 2026-09-18
 
 ## Context
 

@@ -14,6 +14,7 @@ import {
   useUpdateSolvePenalty,
 } from '../solves/use-solves.js';
 import { useSolveStore } from '../solves/use-solve-store.js';
+import { ScrambleView } from '../scramble/ScrambleView.js';
 import { TimerDisplay } from './TimerDisplay.js';
 import { useTimer, type SolveResult } from './use-timer.js';
 
@@ -118,9 +119,9 @@ export function TimerPage(): ReactElement {
           </label>
         </div>
 
-        <p className="mt-6 text-center font-mono text-lg break-words text-slate-700">
-          {scramble?.notation ?? 'Generating scramble…'}
-        </p>
+        <div className="mt-6">
+          <ScrambleView scramble={scramble} />
+        </div>
 
         {/*
           `touch-none` stops the browser treating a press as the start of a scroll or a

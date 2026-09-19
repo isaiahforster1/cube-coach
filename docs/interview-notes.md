@@ -1449,3 +1449,131 @@ it as part of the control rather than as stray text.
 The first version toggled on click, which meant a mouse user — who has already hovered by
 the time the click lands — closed the tip they had just opened. It now opens on click and
 dismisses on Escape, on tapping elsewhere, or on the pointer leaving.
+
+---
+
+## Scramble playback and difficulty labels
+
+### Why rewrite the cube from six faces into 26 pieces?
+
+Because a layer turn moves _pieces_, and the nine pieces of a layer own stickers on five
+different faces of the engine's array. There is no transform you can apply to a flat face
+that does the right thing to a third of it.
+
+Once the cube is 26 small cubes, a turn is one wrapper element around nine of them with a
+single rotation on it, and the browser composites it.
+
+The earlier ADR predicted this would need Three.js. It was wrong, and it was wrong because
+it measured the difficulty of the _rendering_ rather than the difficulty of the
+_coordinates_. Working out where each of the 54 stickers sits in space was the actual
+problem; after that the animation was a transform.
+
+> "The renderer had the wrong shape for the job. A turn moves pieces, so I made the cube
+> out of pieces."
+
+### How does the animation stay in sync with the engine?
+
+It never computes a position. The player tracks one number — how many moves are done — and
+asks the engine for the position. The animation only interpolates an angle.
+
+So while a turn is running, the cube draws _the position before the move with one layer
+rotated part-way_. At the full angle that is identical to _the position after the move
+with nothing rotated_, because the stickers have landed exactly where the engine says they
+go. When the turn finishes, the move count goes up, the rotation is dropped, and nothing
+visibly changes.
+
+> "The animation is decoration. The engine is the only thing that knows where stickers
+> are, so the picture can never disagree with the model."
+
+This is the same principle as the timer being a pure state machine, and as AI not owning
+cube logic: the thing that must be correct is kept separate from the thing that must look
+good.
+
+### How do you know the sticker coordinates are right?
+
+The engine's move tables were derived one way — adjacent strips of facelet indices. The
+coordinates were derived another — positions in 3D space. If both are right they must
+produce identical moves, so there is a test that rebuilds all eighteen moves from the
+coordinates alone and compares them against the engine.
+
+It runs over random scrambled positions rather than a solved cube, because on a solved cube
+every sticker on a face is the same colour — a mapping that shuffled cells _within_ one
+face would pass and still be wrong.
+
+This is the same cross-check that previously caught three reversed tables in the engine
+itself.
+
+### What is the subtle bug you had to design a test around?
+
+CSS measures y **downwards**; the cube measures it upwards. So a clockwise turn seen from
+outside the cube is a positive CSS rotation for some faces and a negative one for others.
+
+Get it wrong and half the moves spin backwards. There is a test that derives each face's
+CSS direction from the cube's own rotation composed with the screen's axis flip, so the
+signs are proven rather than guessed.
+
+### What did the browser find that the tests did not?
+
+Pressing "next move" three times quickly only advanced one move: every press during an
+animation was being dropped. The button felt broken.
+
+Now an in-flight turn counts as finished the moment another step is requested, so each
+press advances a move. There is a test for it that says so.
+
+> "Unit tests told me the state machine was right. Clicking the button told me it felt
+> broken. Both are worth doing."
+
+### Why does pausing let the current move finish?
+
+Because stopping a layer at 40 degrees would leave the cube in a position that does not
+exist and that the engine cannot describe. Pause stops the _next_ move being queued.
+
+### Why is the cube hidden behind a link rather than shown by default?
+
+Notation is a compressed language. Someone who reads it fluently would find a cube in the
+way of the thing they came for; someone who does not read it cannot use the timer at all.
+
+So it is opt-in, the choice is remembered in this browser, and the default stays the
+uncluttered screen. The same reasoning as making the account optional — the tool should not
+demand something from you before it is useful.
+
+### Why do all the playback controls blur themselves after a click?
+
+Because a focused `<button>` owns the spacebar, and the spacebar starts a solve. Leaving
+focus on the play button means the next press replays the scramble instead of starting the
+timer — with no visible clue why.
+
+The speed slider blurs on pointer release rather than on change, because blurring on change
+would make the arrow keys unusable for someone adjusting it from the keyboard.
+
+### How is a scramble's difficulty measured?
+
+By the optimal cross length, computed exactly by breadth-first search — the same search the
+statistics use.
+
+The cross is the only part of a solve the scramble fully determines. Everything afterwards
+depends on choices the solver makes; the cross is a fixed, computable cost. So "Hard" is a
+precise claim — this cross cannot be done in under seven moves — and the tooltip says so,
+including that it measures nothing beyond the cross.
+
+### Where did the thresholds come from?
+
+Measurement, not taste. Over a large sample of random cubes, cross length is ≤4 about 7% of
+the time, 5 or 6 about three quarters of the time, and ≥7 about 17%.
+
+So the labels name the tails. A label is only useful if it distinguishes this scramble from
+the last one — if every second scramble were "hard" the word would carry no information and
+people would correctly stop reading it. A test asserts those shares stay in range, so a
+future change to a threshold cannot quietly make the label meaningless.
+
+> "I didn't pick the thresholds, I measured the distribution and named the tails."
+
+### Why compute the rating after the first paint instead of during render?
+
+The first rating builds a search over every reachable cross position — about a tenth of a
+second. Every one after that is a table lookup.
+
+A tenth of a second is short and still too long to spend before showing someone their
+scramble, so the label appears a moment later and the scramble is readable throughout. A
+web worker would remove it from the main thread entirely, which is the right answer if this
+grows and more machinery than a one-off tenth of a second deserves now.

@@ -29,18 +29,20 @@ reversal destroys the only thing this directory is for.
 
 ## Index
 
-| ADR                                                     | Title                                                     | Status   |
-| ------------------------------------------------------- | --------------------------------------------------------- | -------- |
-| [0001](0001-technology-stack.md)                        | Technology stack for the MVP                              | Accepted |
-| [0002](0002-monorepo-with-shared-source-package.md)     | Monorepo with a shared source package                     | Accepted |
-| [0003](0003-cube-state-representation.md)               | Represent the cube as stickers, not pieces                | Accepted |
-| [0004](0004-scramble-generation.md)                     | Use cubing.js for scrambles, behind our own interface     | Accepted |
-| [0005](0005-integration-tests-against-real-database.md) | Integration tests run against a real database             | Accepted |
-| [0006](0006-session-cookies-not-jwt.md)                 | Database-backed session cookies, not JWTs                 | Accepted |
-| [0007](0007-versioned-api-path.md)                      | Version the API in the URL, with health checks outside it | Accepted |
-| [0008](0008-timer-as-a-pure-state-machine.md)           | The timer is a pure state machine in the shared package   | Accepted |
-| [0009](0009-never-lose-a-solve.md)                      | Never lose a solve                                        | Accepted |
-| [0010](0010-statistics-built-for-diagnosis.md)          | Statistics are built for diagnosis, not just reporting    | Accepted |
-| [0011](0011-css-cube-rendering.md)                      | Render the cube with CSS 3D transforms                    | Accepted |
-| [0012](0012-guest-first.md)                             | The account is optional                                   | Accepted |
-| [0013](0013-google-sign-in.md)                          | Google sign-in, as an option rather than a replacement    | Accepted |
+| ADR                                                     | Title                                                     | Status                                                  |
+| ------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| [0001](0001-technology-stack.md)                        | Technology stack for the MVP                              | Accepted                                                |
+| [0002](0002-monorepo-with-shared-source-package.md)     | Monorepo with a shared source package                     | Accepted                                                |
+| [0003](0003-cube-state-representation.md)               | Represent the cube as stickers, not pieces                | Accepted                                                |
+| [0004](0004-scramble-generation.md)                     | Use cubing.js for scrambles, behind our own interface     | Accepted                                                |
+| [0005](0005-integration-tests-against-real-database.md) | Integration tests run against a real database             | Accepted                                                |
+| [0006](0006-session-cookies-not-jwt.md)                 | Database-backed session cookies, not JWTs                 | Accepted                                                |
+| [0007](0007-versioned-api-path.md)                      | Version the API in the URL, with health checks outside it | Accepted                                                |
+| [0008](0008-timer-as-a-pure-state-machine.md)           | The timer is a pure state machine in the shared package   | Accepted                                                |
+| [0009](0009-never-lose-a-solve.md)                      | Never lose a solve                                        | Accepted                                                |
+| [0010](0010-statistics-built-for-diagnosis.md)          | Statistics are built for diagnosis, not just reporting    | Accepted                                                |
+| [0011](0011-css-cube-rendering.md)                      | Render the cube with CSS 3D transforms                    | Superseded by [0014](0014-animate-turns-with-pieces.md) |
+| [0012](0012-guest-first.md)                             | The account is optional                                   | Accepted                                                |
+| [0013](0013-google-sign-in.md)                          | Google sign-in, as an option rather than a replacement    | Accepted                                                |
+| [0014](0014-animate-turns-with-pieces.md)               | Animate turns by drawing pieces, not faces                | Accepted                                                |
+| [0015](0015-scramble-difficulty-label.md)               | Label scramble difficulty by optimal cross length         | Accepted                                                |

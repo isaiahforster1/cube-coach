@@ -14,6 +14,11 @@ function stickers(container: HTMLElement) {
   return [...container.querySelectorAll('[data-sticker]')];
 }
 
+/** The sticker slots pointing out of a given face of the cube, wherever they are drawn. */
+function facing(container: HTMLElement, face: string) {
+  return [...container.querySelectorAll(`[data-face="${face}"]`)];
+}
+
 describe('CubeView', () => {
   it('draws all 54 stickers', () => {
     const { container } = render(<CubeView state={createSolvedCube()} />);
@@ -32,15 +37,14 @@ describe('CubeView', () => {
   });
 
   /**
-   * The check that the CSS layout agrees with the engine's facelet order. Each face
-   * element must contain exactly its own nine stickers when the cube is solved — if a
-   * face were wired to the wrong slice of the array, this fails immediately.
+   * The check that the layout agrees with the engine's facelet order. Every sticker
+   * slot pointing out of a given face must hold that face's colour on a solved cube —
+   * if a piece were wired to the wrong index, this fails immediately.
    */
   it.each(FACES)('puts the right nine stickers on face %s when solved', (face) => {
     const { container } = render(<CubeView state={createSolvedCube()} />);
-    const element = container.querySelector(`[data-face="${face}"]`);
+    const faceStickers = facing(container, face);
 
-    const faceStickers = [...(element?.querySelectorAll('[data-sticker]') ?? [])];
     expect(faceStickers).toHaveLength(9);
     expect(faceStickers.every((s) => s.getAttribute('data-sticker') === face)).toBe(true);
   });
@@ -49,10 +53,7 @@ describe('CubeView', () => {
     const scrambled = applyMoves(createSolvedCube(), parseAlgorithm('R'));
     const { container } = render(<CubeView state={scrambled} />);
 
-    const front = container.querySelector('[data-face="F"]');
-    const frontStickers = [...(front?.querySelectorAll('[data-sticker]') ?? [])].map((s) =>
-      s.getAttribute('data-sticker'),
-    );
+    const frontStickers = facing(container, 'F').map((s) => s.getAttribute('data-sticker'));
 
     // R pulls the D colour up into the front-right column, so the front face is no
     // longer uniform.
@@ -170,5 +171,92 @@ describe('CubeView dragging', () => {
 
     fireEvent.pointerDown(cube, { clientX: 0, clientY: 0 });
     expect(document.activeElement).toBe(cube);
+  });
+});
+
+/**
+ * The cube is drawn as 26 pieces so that one layer can be rotated on its own. These
+ * check the wrapper is built correctly; that the rotation lands the stickers exactly
+ * where the engine says they go is checked in `geometry.test.ts`, which rebuilds every
+ * move from the same coordinates and compares it against the engine.
+ */
+describe('CubeView turning a layer', () => {
+  function pieces(container: HTMLElement) {
+    return [...container.querySelectorAll('[data-piece]')];
+  }
+
+  function layer(container: HTMLElement) {
+    return container.querySelector('[data-testid="turning-layer"]');
+  }
+
+  it('draws 26 pieces and no turning layer when nothing is turning', () => {
+    const { container } = render(<CubeView state={createSolvedCube()} />);
+
+    expect(pieces(container)).toHaveLength(26);
+    expect(layer(container)).toBeNull();
+  });
+
+  it('still draws every sticker while a layer is turning', () => {
+    const { container } = render(
+      <CubeView state={createSolvedCube()} turn={{ move: 'R', angle: 45 }} />,
+    );
+
+    expect(pieces(container)).toHaveLength(26);
+    expect(stickers(container)).toHaveLength(54);
+  });
+
+  it('lifts exactly the nine pieces of the layer into the wrapper', () => {
+    const { container } = render(
+      <CubeView state={createSolvedCube()} turn={{ move: 'R', angle: 30 }} />,
+    );
+
+    const turning = [...(layer(container)?.querySelectorAll('[data-piece]') ?? [])];
+    expect(turning).toHaveLength(9);
+
+    // Every piece in the R layer has x = 1, and no other piece does.
+    expect(turning.every((piece) => piece.getAttribute('data-piece')?.startsWith('1,'))).toBe(true);
+  });
+
+  it('takes the right layer for each face', () => {
+    const cases = [
+      { move: 'U' as const, test: (key: string) => key.split(',')[1] === '1' },
+      { move: 'D' as const, test: (key: string) => key.split(',')[1] === '-1' },
+      { move: 'F' as const, test: (key: string) => key.split(',')[2] === '1' },
+      { move: 'B' as const, test: (key: string) => key.split(',')[2] === '-1' },
+      { move: 'L' as const, test: (key: string) => key.split(',')[0] === '-1' },
+    ];
+
+    for (const { move, test } of cases) {
+      const { container, unmount } = render(
+        <CubeView state={createSolvedCube()} turn={{ move, angle: 10 }} />,
+      );
+      const turning = [...(layer(container)?.querySelectorAll('[data-piece]') ?? [])];
+
+      expect(turning).toHaveLength(9);
+      expect(turning.every((piece) => test(piece.getAttribute('data-piece') ?? ''))).toBe(true);
+      unmount();
+    }
+  });
+
+  it('rotates the wrapper by the angle it is given', () => {
+    const { container } = render(
+      <CubeView state={createSolvedCube()} turn={{ move: 'R', angle: 45 }} />,
+    );
+
+    expect(layer(container)?.getAttribute('style')).toContain('rotateX(45deg)');
+  });
+
+  /**
+   * U turns clockwise seen from above, which is a *negative* CSS rotation because the
+   * screen's y axis points down while the cube's points up. Half the moves would look
+   * right and half would spin backwards if this were wrong, and both would still end in
+   * the correct position — so only a test or a careful look catches it.
+   */
+  it('turns U the correct way round on screen', () => {
+    const { container } = render(
+      <CubeView state={createSolvedCube()} turn={{ move: 'U', angle: 90 }} />,
+    );
+
+    expect(layer(container)?.getAttribute('style')).toContain('rotateY(-90deg)');
   });
 });
