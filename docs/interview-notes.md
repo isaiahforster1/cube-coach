@@ -1732,3 +1732,240 @@ divisible by three. That holds on a real cube and fails immediately if any corne
 the wrong way round.
 
 > "Anything hand-entered gets checked against something the cube itself guarantees."
+
+## Shipping it: the build, the timer and the health check
+
+### Why did the deployed app quietly serve worse scrambles than the dev server?
+
+Because the code that generates a proper scramble runs in a **worker**, and the bundler had
+put the entire application in front of it.
+
+A worker is a separate thread with no page in it — no `document`, no DOM. cubing.js boots
+its solver in one, and decides at runtime which file to start it from, so the bundler cannot
+see that decision. It treated that file as ordinary shared code and hoisted the helpers it
+needed into the application's main chunk. The worker's first line therefore imported the
+whole app, which touches `document` immediately, and died.
+
+Nothing crashed visibly. There is a fallback that generates a rough scramble by shuffling
+moves, so the app kept working and only a small amber notice said which kind you were
+getting.
+
+The general lesson: a worker is a **different runtime**, and any bundler decision that
+merges its code with page code is a latent crash. It only ever appears in a built bundle,
+never with the dev server, which is why it survived to production.
+
+> "The solver runs in a worker, and the bundler had folded the app into the worker's entry
+> file. There's no `document` in a worker, so it died on the first line and fell back to the
+> weaker scramble."
+
+### There were two fixes. Why did it need both?
+
+Because there were two separate paths for `document` to arrive.
+
+The first was the hoisting above: keeping every cubing.js module in its own chunk stops the
+worker's entry sharing a file with our code.
+
+The second was subtler. Vite compiles a dynamic `import()` into `__vitePreload(load, deps)`,
+and that helper injects `<link rel="modulepreload">` tags — so it reads `document`. It skips
+that work entirely when `deps` is empty, so the fix was to leave the worker's entry with no
+dependency chunks at all. Turning module preloading fully off did that; `{ polyfill: false }`
+only removed one of the helper's two `document` users.
+
+Checking each change alone was what proved both were needed. Either one on its own still
+produced a dead worker.
+
+> "One stopped the app's code reaching the worker; the other stopped Vite's preload helper
+> running inside it. I tested them separately, and each alone still crashed."
+
+### Why not just put the whole library in one chunk?
+
+That was the first fix, and it worked. It also threw away cubing.js's own code splitting:
+the library ships a chunk per event, and one big chunk meant a 3x3x3 scramble downloaded the
+megaminx and side-event solvers as well — about 1.2 MB instead of 800 kB.
+
+Mapping each module to its own chunk name keeps the library's splitting intact and still
+separates it from our code.
+
+Worth noting what the measurement showed, because it contradicted the expectation: the main
+bundle barely changed either way (447 kB to 445 kB). cubing.js was never in the entry chunk.
+The problem was never bundle size; it was **which file the worker booted**.
+
+> "Measuring it showed the entry bundle was the same size either way. The size wasn't the
+> bug — the worker's entry file was."
+
+### The timer stuck at red and never went green. What was actually wrong?
+
+Two clocks disagreeing about one boundary.
+
+Releasing starts a solve only after the key has been held for 550ms, and a `setTimeout`
+promotes the hold when that time is up. But `setTimeout` truncates a fractional delay to
+whole milliseconds, and `performance.now()` is deliberately coarsened for security. So the
+callback could arrive when the clock read 549.9ms of a 550ms hold.
+
+The state machine — correctly — declined to arm a hold that is not yet 550ms long. And that
+is where it died: nothing changed, so the effect's dependencies did not change, so nothing
+ever rescheduled. A single shot had missed, and there was no second one. The timer sat on
+`holding` until the key came up.
+
+Intermittent, because it depended on where in a millisecond the press happened to land —
+which is exactly why pressing quickly made it show up.
+
+> "The arming timeout fired a fraction of a millisecond early, the machine rightly refused to
+> arm, and nothing rescheduled. One missed shot and it was stuck."
+
+### Why fix the scheduler rather than let the machine round up?
+
+Because the machine being strict is the property worth keeping.
+
+A hold of 549.9ms genuinely is not a hold of 550ms. If the reducer starts accepting "close
+enough", then the rule it enforces stops being checkable, and every future question about it
+— does inspection overrun at exactly 15 seconds? — gets the same fudge.
+
+The imprecision belongs where the imprecision is: in the adapter that reads clocks and
+schedules timeouts. So the timeout now re-arms itself, checking the clock and scheduling
+again for whatever is left, until the clock itself agrees. It settles in one extra hop at
+most, and the measured arming latency did not move — 556 to 563ms before and after.
+
+The general shape: **keep the pure core exact, and put tolerance for the messy world in the
+layer that touches the messy world.**
+
+> "I didn't want the state machine to start approximating. The clock imprecision is the
+> adapter's problem, so the adapter retries until the clock agrees."
+
+### How did you prove it was fixed, given it only happened sometimes?
+
+Two ways, because neither alone is enough.
+
+A unit test pins the exact mechanism: fire the timeout while the injected clock still reads
+549.9ms, and assert the timer arms anyway rather than sitting there five seconds later. It
+fails against the old code and passes against the new, which is the only thing that makes it
+a regression test rather than decoration.
+
+Then the same scripted burst of presses in a real browser, against a real production build,
+before and after: 2 of 15 holds stuck before, 0 of 55 after.
+
+> "A unit test for the exact boundary, and a scripted burst in a real browser before and
+> after. The unit test says why; the browser run says whether."
+
+### What can end a touch that cannot end a key press?
+
+Three things, and all three left the timer held.
+
+A browser can **take the gesture away** — deciding a touch was really a scroll, or a pinch,
+or a long-press menu. It then sends `pointercancel` and no `pointerup` ever arrives. That one
+has to abandon the hold rather than release it, because releasing from an armed hold would
+start a solve the person never asked for.
+
+A finger **drifts** over half a second of holding, and a mouse can be dragged off
+deliberately. The release then goes to whatever element is under it. Capturing the pointer
+redirects everything for that pointer back to the timer surface.
+
+And there can be **more than one**. Two hands on a cube means two thumbs over the screen,
+each with its own pointer and its own release. A second thumb lifting was ending the hold the
+first was still making, so the surface now remembers which pointer started it.
+
+> "A key press only ends one way. A touch can be cancelled by the browser, wander off the
+> element, or be one of several — and all three left it held."
+
+### Capturing the pointer introduced a bug. What happened?
+
+`setPointerCapture` throws if the pointer is no longer active by the time you ask. It was
+being called before the press was dispatched, so the throw escaped the handler and the press
+was swallowed — the timer did not start at all.
+
+That is a strictly worse failure than the one capture was there to prevent. The press is the
+point of the handler; capture is an improvement on the release. So the press goes first, and
+the capture is wrapped and allowed to fail.
+
+The habit worth keeping: when you add a nice-to-have to a handler, make sure it cannot take
+the must-have down with it.
+
+> "The enhancement threw and killed the thing it was enhancing. Do the essential work first,
+> and let the optional part fail quietly."
+
+### Why was `SELECT 1` not a readiness check?
+
+Because it asks the wrong question. It proves something answered on the other end of the
+socket — not that the database has any of our tables in it.
+
+A freshly provisioned database with no migrations applied passes `SELECT 1` perfectly. So the
+instance reported itself ready, the platform routed traffic to it, and every request that
+touched a table failed. That is precisely the situation readiness exists to prevent: the
+difference between liveness ("is this process alive?") and readiness ("can it actually
+serve?") is that readiness is allowed to know about its dependencies.
+
+It now reads a row from `users` — a `LIMIT 1`, so it stays cheap as the table grows. An empty
+table is a fine answer; the question is whether the query can run at all.
+
+> "`SELECT 1` proves Postgres is listening. It doesn't prove the schema was ever created,
+> which is the failure that actually happens on a new environment."
+
+### How do you test a readiness check without a broken database?
+
+Make a real one. The test creates an empty Postgres schema, points a client at it, and asks
+for readiness — no mocks, because the whole assertion is the difference between "Postgres
+answers" and "our tables are there", and a mock would just be restating the answer you
+expect.
+
+Two obvious ways to point at that schema do not work, and both are recorded in the test
+because both pass against the old route. `?schema=` is a Prisma engine parameter, and Prisma
+7 talks to Postgres through the `pg` driver, which ignores it. `?options=-c search_path=`
+genuinely changes the session's search path — and changes nothing here, because Prisma writes
+fully qualified SQL: `SELECT "public"."users"."id" FROM "public"."users"`. Only telling the
+adapter the schema changes what it generates.
+
+The trap is that both wrong versions **pass**, quietly, for the wrong reason. A test that
+cannot fail is worse than no test, so the check is always: does this fail against the code I
+am replacing?
+
+> "Both of the obvious ways to point at an empty schema silently connected to the real one
+> and passed. I only trusted the test once I'd watched it fail against the old route."
+
+### Why does a page scroll on a phone when it fits on the screen?
+
+Because `100vh` is not the height you can see. It is the height of the viewport with the
+browser's address bar hidden, which is taller than the visible area while the bar is showing.
+A layout that is `min-height: 100vh` is therefore born slightly too long and scrolls a little
+no matter what is on it.
+
+`100dvh` — dynamic viewport height — tracks the visible height as the bar comes and goes,
+which is what was wanted all along.
+
+The other half of "awkward scrolling" was not scrolling at all: a downward drag near the top
+is pull-to-refresh, and a drag past either end is a rubber-band bounce. Both are reasonable
+on a document and awful on a timer, where a refresh mid-session reloads the app and the
+screen slides under a thumb trying to hold still. `overscroll-behavior-y: none` keeps the
+gesture inside the page.
+
+> "`100vh` measures the viewport with the address bar hidden, so the page is always a bit too
+> tall. `100dvh` measures what you can actually see."
+
+### The press target was the real complaint. What was wrong with it?
+
+It was a fixed band around the digits — about a quarter of a phone screen — so most of a tap
+aimed at "the timer" landed on nothing at all and simply did not register.
+
+Making it claim all the space left over after the scramble and the controls took it from 23%
+of the viewport to 56%, which is the target a thumb is actually aiming at. The fix was a
+layout change, not an event-handling one: nothing was wrong with the handler, there was just
+very little to press.
+
+> "It wasn't missing the presses. There was almost nothing to press — the surface was a
+> quarter of the screen and the rest was dead space."
+
+### And the instruction said "press space" on a device with no space bar.
+
+There is no honest way to ask a browser whether a keyboard exists; the platform deliberately
+does not expose it. The closest available proxy is the **primary pointer** — `(pointer:
+coarse)` is true for a finger and false for a mouse — and it is the proxy the platform
+intends for this purpose.
+
+It is subscribed to rather than read once, because the answer changes: a tablet gains a
+keyboard case, a laptop folds into a tablet. Reading it at mount would leave the wrong
+instruction on screen until a reload.
+
+Worth being clear that it is a proxy and not the real question. A laptop with a touchscreen
+reports fine, which is right — it has a keyboard and its owner will use it.
+
+> "You can't ask whether there's a keyboard. You can ask whether the primary pointer is a
+> finger, which is the proxy the platform provides for exactly this."
