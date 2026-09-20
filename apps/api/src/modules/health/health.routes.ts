@@ -18,7 +18,21 @@ export function registerHealthRoutes(app: FastifyInstance): void {
 
   app.get('/health/ready', async (_request, reply) => {
     try {
-      await app.prisma.$queryRaw`SELECT 1`;
+      /**
+       * A real table, not `SELECT 1`.
+       *
+       * `SELECT 1` proves only that something answered on the other end of the socket.
+       * A freshly provisioned database with no migrations applied satisfies it
+       * perfectly, so the instance reported itself ready, the platform sent it traffic,
+       * and every request that touched a table failed — which is the one situation a
+       * readiness check exists to prevent.
+       *
+       * Reading a row instead proves the schema is actually there. `findFirst` with a
+       * single selected column is a `LIMIT 1`, so it stays cheap however large the
+       * table grows, and an empty table is a perfectly good answer: what is being
+       * asked is whether the query can run at all, not whether anyone has signed up.
+       */
+      await app.prisma.user.findFirst({ select: { id: true } });
       return { status: 'ready', database: 'ok' };
     } catch (error) {
       app.log.error({ err: error }, 'Readiness check failed');
