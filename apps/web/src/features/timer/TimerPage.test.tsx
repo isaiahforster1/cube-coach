@@ -104,3 +104,41 @@ describe('TimerPage inspection toggle', () => {
     expect(screen.getByText(/press space to begin inspection/iu)).toBeInTheDocument();
   });
 });
+
+/**
+ * "Hold space" is useless advice on a phone. The instruction has to describe the input
+ * the device actually has.
+ */
+describe('TimerPage instructions on a touch device', () => {
+  function stubCoarsePointer(): void {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+  }
+
+  it('tells a finger to touch and hold rather than to press space', async () => {
+    mockApi();
+    stubCoarsePointer();
+    renderWithProviders(<TimerPage />);
+
+    expect(await screen.findByText(/touch and hold, release to start/iu)).toBeInTheDocument();
+    expect(screen.queryByText(/space/iu)).not.toBeInTheDocument();
+  });
+
+  it('adapts the inspection instruction too', async () => {
+    mockApi();
+    stubCoarsePointer();
+    const user = userEvent.setup();
+    renderWithProviders(<TimerPage />);
+
+    await user.click(await screen.findByLabelText('Inspection'));
+
+    expect(screen.getByText(/touch to begin inspection, then hold to start/iu)).toBeInTheDocument();
+    expect(screen.queryByText(/space/iu)).not.toBeInTheDocument();
+  });
+});

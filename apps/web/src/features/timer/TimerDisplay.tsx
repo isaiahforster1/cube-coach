@@ -64,10 +64,6 @@ export function TimerDisplay({
 }
 
 /**
- * Inspection counts down in whole seconds, then shows the penalty once it overruns —
- * a cuber needs to know they have crossed into +2 territory before starting, not after.
- */
-/**
  * Inspection counts down in whole seconds, then names the penalty once it overruns — a
  * cuber needs to know they have crossed into +2 territory before starting, not after.
  */

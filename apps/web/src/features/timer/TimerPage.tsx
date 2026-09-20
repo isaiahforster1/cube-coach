@@ -14,6 +14,7 @@ import {
   useUpdateSolvePenalty,
 } from '../solves/use-solves.js';
 import { useSolveStore } from '../solves/use-solve-store.js';
+import { useCoarsePointer } from '../../lib/use-coarse-pointer.js';
 import { ScrambleView } from '../scramble/ScrambleView.js';
 import { TimerDisplay } from './TimerDisplay.js';
 import { useTimer, type SolveResult } from './use-timer.js';
@@ -26,6 +27,7 @@ export function TimerPage(): ReactElement {
   const updatePenalty = useUpdateSolvePenalty();
   const { pendingCount, isSyncing } = useSolveSync();
   const { isGuest } = useSolveStore();
+  const isTouch = useCoarsePointer();
 
   const [inspectionEnabled, setInspectionEnabled] = useState(false);
   const [scramble, setScramble] = useState<Scramble | null>(null);
@@ -94,8 +96,8 @@ export function TimerPage(): ReactElement {
   const finished = timer.phase === 'stopped';
 
   return (
-    <AppLayout>
-      <div className="flex flex-col">
+    <AppLayout fillsViewport>
+      <div className="flex flex-1 flex-col">
         <div className="flex items-center justify-end">
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
@@ -124,12 +126,20 @@ export function TimerPage(): ReactElement {
         </div>
 
         {/*
+          The press surface is everything left over, not a band in the middle.
+
+          It used to be a fixed `py-20` block around the digits — about a quarter of a
+          phone screen — so most of a tap aimed at "the timer" landed on nothing at all.
+          `flex-1` gives it every pixel the scramble and the controls do not need, which
+          on a phone is most of the screen and is the target a thumb is actually aiming
+          at. `min-h-48` keeps it worth pressing on a short landscape screen.
+
           `touch-none` stops the browser treating a press as the start of a scroll or a
           pinch, which would otherwise swallow the event on a phone.
         */}
         <section
           {...timer.surfaceProps}
-          className="flex touch-none items-center justify-center py-20 select-none"
+          className="flex min-h-48 flex-1 touch-none items-center justify-center py-8 select-none"
         >
           <TimerDisplay
             phase={timer.phase}
@@ -167,9 +177,7 @@ export function TimerPage(): ReactElement {
             </div>
           ) : (
             <p className="text-center text-sm text-slate-400">
-              {inspectionEnabled
-                ? 'Press space to begin inspection, then hold to start.'
-                : 'Hold space, release to start.'}
+              {instructionFor({ inspectionEnabled, isTouch })}
             </p>
           )}
 
@@ -188,6 +196,28 @@ export function TimerPage(): ReactElement {
       </div>
     </AppLayout>
   );
+}
+
+/**
+ * What to tell someone to do, in terms of the input they actually have.
+ *
+ * Telling a phone user to "hold space" is not a small blemish — it is the only
+ * instruction on the screen, and it describes a key their device does not have.
+ */
+function instructionFor({
+  inspectionEnabled,
+  isTouch,
+}: {
+  inspectionEnabled: boolean;
+  isTouch: boolean;
+}): string {
+  if (inspectionEnabled) {
+    return isTouch
+      ? 'Touch to begin inspection, then hold to start.'
+      : 'Press space to begin inspection, then hold to start.';
+  }
+
+  return isTouch ? 'Touch and hold, release to start.' : 'Hold space, release to start.';
 }
 
 function SaveStatus({

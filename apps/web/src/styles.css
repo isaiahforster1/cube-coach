@@ -40,3 +40,17 @@
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
+
+/*
+  Do not let a gesture that starts here turn into a browser gesture.
+
+  A phone treats a downward drag at the top of a page as pull-to-refresh and a drag past
+  either end as a rubber-band bounce. Both of those are reasonable on a document and
+  awful on a timer: the screen slides around under a thumb that is trying to hold still,
+  and a refresh mid-session reloads the app. `none` keeps the scroll inside the page and
+  cancels the browser's own gesture, without preventing the page from scrolling normally
+  when it has something to scroll.
+*/
+html {
+  overscroll-behavior-y: none;
+}
