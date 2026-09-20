@@ -13,20 +13,63 @@ export default defineConfig({
    */
   worker: { format: 'es' },
 
+  /**
+   * Both settings below exist for one reason: keeping `document` out of the scramble
+   * worker. Neither works without the other, and the failure they prevent is invisible
+   * in development.
+   *
+   * cubing.js solves scrambles in a worker it boots from a file it picks at runtime.
+   * Vite compiles the dynamic import in that worker entry into a `__vitePreload(load,
+   * deps)` call, and `__vitePreload` injects `<link rel="modulepreload">` tags for its
+   * dependency chunks — so it reads `document`. There is no `document` in a worker, so
+   * the worker throws `ReferenceError: document is not defined` on its first line, the
+   * solver never answers, and the timer quietly serves a hand-rolled practice scramble
+   * instead of a real one. The dev server never bundles, so none of this happens until
+   * you build and run the thing.
+   *
+   * The saving grace is that `__vitePreload` skips the `document` work entirely when
+   * `deps` is empty. So the fix is to leave the worker entry with no dependency chunks.
+   */
   build: {
     /**
-     * Off, because the polyfill breaks the scramble worker.
+     * Fully off, not just `{ polyfill: false }`.
      *
-     * Vite injects a module-preload polyfill for older Safari, and it touches
-     * `document` at module scope. When the bundler folds it into a chunk the scramble
-     * worker imports, the worker dies on its first line with `document is not defined`
-     * — there is no `document` in a worker — and the timer sits on "Generating
-     * scramble…" forever.
+     * The polyfill was one `document` user; the preload helper is the other, and it
+     * stays even when the polyfill goes. Turning preloading off entirely is what drops
+     * the stylesheet out of the worker entry's dependency list — the last entry keeping
+     * that list non-empty.
      *
-     * It only happens in a built bundle, never with the dev server, so it is invisible
-     * until you actually build and run the thing.
+     * It costs the app nothing today: the client builds to a single entry chunk with no
+     * lazily-loaded routes, so there is nothing for a preload hint to warm up.
      */
-    modulePreload: { polyfill: false },
+    modulePreload: false,
+
+    rollupOptions: {
+      output: {
+        /**
+         * Give every cubing.js module a chunk name of its own.
+         *
+         * Two things follow, and both are needed. The worker entry stops sharing a
+         * chunk with our code — by default the bundler hoists the helpers it needs into
+         * the application's entry chunk, so the worker began by importing the whole app
+         * and evaluating it, `document` and all. And the modules it imports statically
+         * end up beside it rather than in a dependency chunk, which is what finally
+         * empties the `__vitePreload` dependency list.
+         *
+         * Naming them per module rather than folding the library into one `cubing`
+         * chunk is what preserves cubing.js's own lazy splitting. It ships a chunk per
+         * event, and a single chunk would make a 3x3x3 scramble pull down the solvers
+         * for megaminx and the side events too — about 1.2 MB where 800 kB will do.
+         */
+        manualChunks(id: string) {
+          const modulePath = /[\\/]cubing[\\/]dist[\\/]lib[\\/]cubing[\\/](.+)$/.exec(id)?.[1];
+          if (modulePath === undefined) return undefined;
+
+          const withoutExtension = modulePath.replace(/\.[^.]+$/, '');
+          return `cubing-${withoutExtension.replace(/[\\/]/g, '-')}`;
+        },
+      },
+    },
   },
 
   server: {
