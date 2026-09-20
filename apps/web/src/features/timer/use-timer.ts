@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   createInitialState,
   DEFAULT_TIMER_CONFIG,
@@ -102,21 +109,51 @@ export function useTimer({
    * tabs, battery saver, an unfocused window. Arming the timer is a state change that
    * must happen after a fixed duration whether or not anything is being repainted, so
    * it gets its own timer.
+   *
+   * It re-arms itself rather than firing once, which is what makes it reliable.
+   *
+   * A single shot has to land on the far side of a boundary that two different clocks
+   * disagree about. `setTimeout` truncates a fractional delay to whole milliseconds,
+   * and `performance.now()` is deliberately coarsened — so the callback can arrive a
+   * hair before the clock agrees the hold is complete. The reducer, quite correctly,
+   * refuses to arm a hold that is 549.9ms long. Nothing then changed, so the effect's
+   * dependencies did not change either, so nothing rescheduled: the timer sat on
+   * `holding` — red, never green — until the key came back up, and the solve had to be
+   * started again. Intermittent, and maddening at speed.
+   *
+   * Checking the clock and scheduling again for whatever is left removes the boundary
+   * problem entirely. `Math.ceil` keeps each wait from being short for the same
+   * truncation reason, so this settles in one extra hop at most.
    */
   useEffect(() => {
-    if (state.phase !== 'holding' || state.holdStartedAt === undefined) return;
+    if (state.phase !== 'holding') return;
 
-    const elapsed = readNow() - state.holdStartedAt;
-    const remaining = Math.max(0, config.holdDurationMs - elapsed);
+    const holdStartedAt = state.holdStartedAt;
+    if (holdStartedAt === undefined) return;
 
-    const timeout = setTimeout(() => {
-      dispatch({ type: 'tick', at: readNow() });
-    }, remaining);
+    const { holdDurationMs } = config;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    // An arrow const rather than a function declaration, which would be hoisted above
+    // the check above and so lose the narrowing on `holdStartedAt`.
+    const arm = (): void => {
+      const at = readNow();
+      const remaining = holdDurationMs - (at - holdStartedAt);
+
+      if (remaining <= 0) {
+        dispatch({ type: 'tick', at });
+        return;
+      }
+
+      timeout = setTimeout(arm, Math.ceil(remaining));
+    };
+
+    arm();
 
     return () => {
       clearTimeout(timeout);
     };
-  }, [state.phase, state.holdStartedAt, config.holdDurationMs, dispatch, readNow]);
+  }, [state.phase, state.holdStartedAt, config, dispatch, readNow]);
 
   /** Repaint while something is moving. Display only — no state depends on this. */
   useEffect(() => {
@@ -188,7 +225,10 @@ export function useTimer({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [dispatch, now]);
+    // `readNow` rather than `now`: the latter is a fresh arrow function on every render
+    // for any caller that does not pass one, which would detach and re-attach these
+    // listeners sixty times a second while the animation loop runs.
+  }, [dispatch, readNow]);
 
   // Report the finished solve exactly once, when the machine reaches `stopped`.
   const reportedRef = useRef(false);
@@ -221,6 +261,75 @@ export function useTimer({
     dispatch({ type: 'reset' });
   }, [dispatch]);
 
+  /**
+   * Which finger owns the hold.
+   *
+   * A keyboard has one spacebar; a phone held in two hands has two thumbs over the
+   * screen, and every one of them produces its own pointer with its own `pointerup`.
+   * Without knowing which pointer began the hold, a second thumb resting on the screen
+   * and lifting again would end a hold the first thumb is still making.
+   */
+  const holdingPointerRef = useRef<number | null>(null);
+
+  const surfaceProps = useMemo(
+    () => ({
+      onPointerDown(event: ReactPointerEvent<Element>): void {
+        // A second finger landing mid-hold is not the start of anything.
+        if (holdingPointerRef.current !== null) return;
+        holdingPointerRef.current = event.pointerId;
+
+        // The press comes first. Everything below is an improvement on it, and none of
+        // it is worth risking the one thing this handler exists to do.
+        dispatch({ type: 'pressDown', at: readNow() });
+
+        /**
+         * Capture the pointer, so every later event for it is delivered here.
+         *
+         * A finger drifts over half a second of holding, and a mouse can be dragged off
+         * deliberately. Without capture the `pointerup` goes to whatever element the
+         * pointer has wandered onto, this surface never hears it, and the timer stays
+         * held with no way out.
+         *
+         * It throws if the pointer is no longer active by the time we ask — a touch
+         * already lifted, a pointer the browser has taken back. Letting that escape
+         * would abandon the press itself, which is a far worse failure than a release
+         * that has to find its own way home.
+         */
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Not capturable. The hold still stands; `blur` and `pointercancel` remain as
+          // the ways out if the release goes astray.
+        }
+      },
+
+      onPointerUp(event: ReactPointerEvent<Element>): void {
+        if (holdingPointerRef.current !== event.pointerId) return;
+        holdingPointerRef.current = null;
+
+        dispatch({ type: 'pressUp', at: readNow() });
+      },
+
+      /**
+       * The browser taking the gesture away — a scroll it decided was really a scroll,
+       * a pinch, a long-press menu, a system edge swipe. `pointerup` never comes, so
+       * this is the only signal that the press is over.
+       *
+       * It abandons rather than releasing, because a gesture that was taken away is not
+       * a deliberate release: releasing from `ready` would start a solve nobody asked
+       * for. `cancel` leaves a running solve alone, which is what protects the clock
+       * from a stray touch elsewhere on the screen mid-solve.
+       */
+      onPointerCancel(event: ReactPointerEvent<Element>): void {
+        if (holdingPointerRef.current !== event.pointerId) return;
+        holdingPointerRef.current = null;
+
+        dispatch({ type: 'cancel' });
+      },
+    }),
+    [dispatch, readNow],
+  );
+
   return {
     state,
     phase: state.phase,
@@ -230,13 +339,6 @@ export function useTimer({
     setPenalty,
     reset,
     /** Touch and mouse support, attached to the timer surface rather than the window. */
-    surfaceProps: {
-      onPointerDown: () => {
-        dispatch({ type: 'pressDown', at: readNow() });
-      },
-      onPointerUp: () => {
-        dispatch({ type: 'pressUp', at: readNow() });
-      },
-    },
+    surfaceProps,
   };
 }

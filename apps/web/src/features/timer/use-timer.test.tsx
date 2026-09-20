@@ -1,5 +1,6 @@
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, renderHook } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { DEFAULT_TIMER_CONFIG } from '@cube-coach/shared';
 import { useTimer } from './use-timer.js';
 
@@ -311,5 +312,233 @@ describe('useTimer between solves', () => {
 
     expect(result.current.phase).toBe('stopped');
     button.remove();
+  });
+});
+
+/**
+ * The bug these exist for: the arming timeout is a single shot, and a `tick` that
+ * arrives even a fraction of a millisecond early is silently discarded. Nothing
+ * reschedules, so the timer sits on `holding` — red, never green — until released.
+ */
+describe('useTimer arming', () => {
+  it('still arms when the hold timeout fires a fraction early', () => {
+    const { result } = setup();
+
+    act(() => {
+      fireEvent.keyDown(window, { code: 'Space' });
+    });
+
+    // `setTimeout` truncates a fractional delay and `performance.now()` is coarsened,
+    // so the callback can land just before the clock agrees the hold is complete.
+    act(() => {
+      clock = 549.9;
+      vi.advanceTimersByTime(550);
+    });
+
+    // Whether it arms on this tick or on a rescheduled one, it must not be stuck: by
+    // the time the hold is unambiguously complete, the timer is armed.
+    advanceFrame(600);
+    expect(result.current.phase).toBe('ready');
+  });
+
+  it('does not stay stuck in holding after an early tick', () => {
+    const { result } = setup();
+
+    act(() => {
+      fireEvent.keyDown(window, { code: 'Space' });
+    });
+    act(() => {
+      clock = 549.9;
+      vi.advanceTimersByTime(550);
+    });
+
+    // Long past any plausible hold, with frames still arriving.
+    advanceFrame(5_000);
+    expect(result.current.phase).toBe('ready');
+  });
+});
+
+/**
+ * The surface is where a phone starts a solve, and a pointer gesture has more ways to
+ * end than a key press does. Each of these left the timer stuck on `holding` — red,
+ * with no way out but releasing and starting over.
+ */
+describe('useTimer pointer handling', () => {
+  function renderSurface() {
+    function Surface(): ReactElement {
+      const timer = useTimer({ now, config: DEFAULT_TIMER_CONFIG });
+      return (
+        <section data-testid="surface" {...timer.surfaceProps}>
+          {timer.phase}
+        </section>
+      );
+    }
+
+    render(<Surface />);
+    return screen.getByTestId('surface');
+  }
+
+  it('starts a hold on a press', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+
+    expect(surface).toHaveTextContent('holding');
+  });
+
+  it('runs a solve from press to release to press', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    advanceFrame(600);
+    expect(surface).toHaveTextContent('ready');
+
+    act(() => {
+      clock = 700;
+      fireEvent.pointerUp(surface, { pointerId: 1 });
+    });
+    expect(surface).toHaveTextContent('running');
+
+    act(() => {
+      clock = 8_700;
+      fireEvent.pointerDown(surface, { pointerId: 2 });
+    });
+    expect(surface).toHaveTextContent('stopped');
+  });
+
+  /**
+   * A browser that decides a touch was really a scroll, a pinch or a long-press menu
+   * takes the gesture away and sends `pointercancel` instead of `pointerup`. The
+   * release never arrives, so without this the timer holds at red forever.
+   */
+  it('abandons the hold when the browser cancels the gesture', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    advanceFrame(200);
+    act(() => {
+      fireEvent.pointerCancel(surface, { pointerId: 1 });
+    });
+
+    expect(surface).toHaveTextContent('idle');
+  });
+
+  /** A cancelled gesture must not start a solve that was never released into. */
+  it('does not start a solve when an armed gesture is cancelled', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    advanceFrame(600);
+    expect(surface).toHaveTextContent('ready');
+
+    act(() => {
+      fireEvent.pointerCancel(surface, { pointerId: 1 });
+    });
+
+    expect(surface).toHaveTextContent('idle');
+  });
+
+  /** A cancelled touch mid-solve must not stop the clock. */
+  it('keeps a running solve when a stray gesture is cancelled', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    advanceFrame(600);
+    act(() => {
+      clock = 700;
+      fireEvent.pointerUp(surface, { pointerId: 1 });
+    });
+    expect(surface).toHaveTextContent('running');
+
+    act(() => {
+      clock = 2_000;
+      fireEvent.pointerDown(surface, { pointerId: 2 });
+      fireEvent.pointerCancel(surface, { pointerId: 2 });
+    });
+
+    // The press stopped it, as any press should. The cancel must not have undone that.
+    expect(surface).toHaveTextContent('stopped');
+  });
+
+  /**
+   * Two hands on a cube means two thumbs on the screen. The second one landing, or
+   * lifting, is not what starts or ends the hold — only the finger that began it.
+   */
+  it('ignores a second finger landing and lifting mid-hold', () => {
+    const surface = renderSurface();
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    advanceFrame(200);
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 2 });
+      fireEvent.pointerUp(surface, { pointerId: 2 });
+    });
+
+    expect(surface).toHaveTextContent('holding');
+
+    advanceFrame(700);
+    expect(surface).toHaveTextContent('ready');
+  });
+
+  /**
+   * A finger drifts while it holds. Without capturing the pointer the release is
+   * delivered to whatever is under it by then, the surface never hears it, and the
+   * timer stays held.
+   */
+  it('captures the pointer so the release cannot be delivered elsewhere', () => {
+    const surface = renderSurface();
+    const capture = vi.spyOn(surface, 'setPointerCapture');
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 7 });
+    });
+
+    expect(capture).toHaveBeenCalledWith(7);
+  });
+});
+
+/**
+ * Capturing the pointer is an improvement on the release, not a condition of the press.
+ * `setPointerCapture` throws whenever the pointer is no longer active by the time it is
+ * asked — and a throw inside the handler used to swallow the press entirely, so the
+ * timer did not start at all.
+ */
+describe('useTimer pointer capture failure', () => {
+  it('still starts the hold when the pointer cannot be captured', () => {
+    function Surface(): ReactElement {
+      const timer = useTimer({ now, config: DEFAULT_TIMER_CONFIG });
+      return (
+        <section data-testid="surface" {...timer.surfaceProps}>
+          {timer.phase}
+        </section>
+      );
+    }
+
+    render(<Surface />);
+    const surface = screen.getByTestId('surface');
+    vi.spyOn(surface, 'setPointerCapture').mockImplementation(() => {
+      throw new DOMException('No active pointer with the given id', 'NotFoundError');
+    });
+
+    act(() => {
+      fireEvent.pointerDown(surface, { pointerId: 1 });
+    });
+    expect(surface).toHaveTextContent('holding');
+
+    advanceFrame(600);
+    expect(surface).toHaveTextContent('ready');
   });
 });
