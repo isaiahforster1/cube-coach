@@ -5,26 +5,6 @@ A Rubik's Cube training platform.
 A timer tells you how fast you solved. CubeCoach is being built to tell you _why_ you are
 solving at the speed you are, and what to practise next.
 
-## Status
-
-Early development. **M10 complete** — no account needed: the timer, history, statistics and cube all work as a guest, and your solves come with you if you sign in.
-
-| Milestone | Scope                                                  | State   |
-| --------- | ------------------------------------------------------ | ------- |
-| M0        | Repo foundation: workspace, TypeScript, lint, CI, docs | ✅ Done |
-| M1        | Cube engine: state, moves, notation                    | ✅ Done |
-| M2        | Scramble generation                                    | ✅ Done |
-| M3        | API skeleton and database                              | ✅ Done |
-| M4        | Authentication                                         | ✅ Done |
-| M5        | Web shell                                              | ✅ Done |
-| M6        | Timer                                                  | ✅ Done |
-| M7        | Solve and session persistence                          | ✅ Done |
-| M8        | History                                                | ✅ Done |
-| M9        | Statistics and personal records                        | ✅ Done |
-| M10       | Interactive cube                                       | ✅ Done |
-| M11       | Algorithm library                                      | Next    |
-| M12       | Hardening and deployment                               |         |
-
 ## Quick start
 
 ```bash
