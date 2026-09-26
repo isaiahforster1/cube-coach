@@ -1,3 +1,4 @@
+import type { Writable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { buildApp } from '../app.js';
@@ -27,6 +28,8 @@ export interface CreateTestContextOptions {
   readonly production?: boolean;
   /** A fake Google, which also switches the Google routes on. */
   readonly google?: GoogleOAuth;
+  /** Capture the application's logs, at info level, for tests about what gets logged. */
+  readonly logStream?: Writable;
   /** Environment overrides; `undefined` removes a variable the local .env would set. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -52,7 +55,8 @@ export async function createTestContext(
     NODE_ENV: options.production === true ? 'production' : 'test',
     DATABASE_URL: databaseUrl,
     // Tests should not print application logs unless something is being debugged.
-    LOG_LEVEL: process.env['TEST_LOG_LEVEL'] ?? 'silent',
+    LOG_LEVEL:
+      options.logStream === undefined ? (process.env['TEST_LOG_LEVEL'] ?? 'silent') : 'info',
   });
 
   const prisma = createPrismaClient(config.DATABASE_URL);
@@ -69,6 +73,7 @@ export async function createTestContext(
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
     ...(options.google === undefined ? {} : { google: options.google }),
+    ...(options.logStream === undefined ? {} : { logStream: options.logStream }),
   });
   await app.ready();
 

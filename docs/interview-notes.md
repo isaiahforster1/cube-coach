@@ -2228,3 +2228,51 @@ stolen token works, even if the thief keeps using it.
 
 > "A session store's real advantage is revocation, so give users a way to use it. And
 > know whether your expiry is absolute or idle; they protect against different things."
+
+### The OAuth flow already had a state parameter. What does PKCE add?
+
+They protect against different things.
+
+- **State** stops an attacker planting _their_ code in _your_ browser (login CSRF). The
+  callback refuses any state it did not issue.
+- **PKCE** stops an attacker using _your_ code in _their_ request. The code travels
+  through URLs, where it can land in browser history, proxy logs or a Referer header. With
+  PKCE, the start of the flow picks a random verifier, keeps it in an httpOnly cookie, and
+  sends Google only its SHA-256 hash (the challenge). The token exchange must present the
+  verifier itself, so Google will not honour a code without it.
+
+The client secret already protected the exchange, so PKCE here is defence in depth rather
+than the only lock. It is still the current recommendation for every OAuth client,
+confidential ones included, because a leaked secret and a leaked code together would
+otherwise be enough.
+
+> "State proves the callback belongs to a flow I started. PKCE proves the code exchange
+> does too. The verifier never travels in a URL, so a leaked code is worthless."
+
+### Why strip query strings from every logged URL, not just the callback?
+
+Fastify's default request log includes the full URL, and the callback's query string held
+a live authorization code. Logs are kept for a long time, shipped to third-party services
+and readable by more people than the database is.
+
+Stripping the query everywhere is simpler than listing the dangerous routes, and it is
+safe by default. A secret added to some future route's query is protected without anyone
+remembering to add it to a list. The cost is small: the query values that stop being logged
+are cursors and practice-session ids.
+
+A proxy in front of the app, like Railway's edge, may still log full URLs, and that is out
+of our hands. That is exactly the case PKCE covers.
+
+> "Don't log what you wouldn't store. Make the safe behaviour the default rather than
+> something each route has to opt into."
+
+### A test failed because the RFC test vector was wrong. What happened?
+
+The test compared our S256 function with the worked example in RFC 7636, appendix B, but
+the example had been written from memory and two strings were off by a few characters. The
+failing test looked like a broken implementation. Before changing any code, the hash was
+recomputed with `openssl` and the real appendix was checked, which showed the
+implementation was right and the test data was wrong.
+
+> "When a known-answer test fails, check the known answer first. It's data, and data typed
+> from memory is the least reliable part of the test."

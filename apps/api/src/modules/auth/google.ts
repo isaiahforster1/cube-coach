@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 /** The fields we ask Google for, and the only ones we keep. */
 export interface GoogleProfile {
@@ -16,8 +16,8 @@ export interface GoogleOAuthConfig {
 }
 
 export interface GoogleOAuth {
-  authorizationUrl(state: string): string;
-  fetchProfile(code: string): Promise<GoogleProfile>;
+  authorizationUrl(state: string, codeChallenge: string): string;
+  fetchProfile(code: string, codeVerifier: string): Promise<GoogleProfile>;
 }
 
 const AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -27,6 +27,24 @@ const USERINFO_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
 /** A random value tying a callback back to the request that started it. */
 export function createOAuthState(): string {
   return randomBytes(32).toString('base64url');
+}
+
+/**
+ * A PKCE code verifier (RFC 7636): 32 random bytes, which base64url-encode to 43
+ * characters, the minimum the specification allows.
+ *
+ * PKCE binds the authorization code to whoever started the flow. The code travels through
+ * URLs, so it can end up in browser history, proxy logs or a Referer header. The verifier
+ * stays in an httpOnly cookie and on this server, and Google will not exchange the code
+ * without it — so a leaked code is useless on its own.
+ */
+export function createPkceVerifier(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+/** The S256 challenge sent to Google: the verifier's SHA-256, base64url-encoded. */
+export function pkceChallenge(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
 }
 
 /**
@@ -41,7 +59,7 @@ export function createGoogleOAuth(
   httpFetch: typeof fetch = fetch,
 ): GoogleOAuth {
   return {
-    authorizationUrl(state: string): string {
+    authorizationUrl(state: string, codeChallenge: string): string {
       const params = new URLSearchParams({
         client_id: config.clientId,
         redirect_uri: config.redirectUri,
@@ -50,6 +68,10 @@ export function createGoogleOAuth(
         // intrusive and a reason for someone to decline.
         scope: 'openid email profile',
         state,
+        // Only the hash goes in the URL. The verifier itself is presented at the exchange,
+        // over a server-to-server request the browser never sees.
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
         // Google omits a refresh token on repeat consents unless asked; we do not want
         // one, because we never act on the user's behalf after sign-in.
         prompt: 'select_account',
@@ -58,7 +80,7 @@ export function createGoogleOAuth(
       return `${AUTHORIZATION_ENDPOINT}?${params.toString()}`;
     },
 
-    async fetchProfile(code: string): Promise<GoogleProfile> {
+    async fetchProfile(code: string, codeVerifier: string): Promise<GoogleProfile> {
       const tokenResponse = await httpFetch(TOKEN_ENDPOINT, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -68,6 +90,7 @@ export function createGoogleOAuth(
           client_secret: config.clientSecret,
           redirect_uri: config.redirectUri,
           grant_type: 'authorization_code',
+          code_verifier: codeVerifier,
         }).toString(),
       });
 

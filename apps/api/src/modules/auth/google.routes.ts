@@ -3,9 +3,19 @@ import { z } from 'zod';
 import { ApiError } from '../../plugins/error-handler.js';
 import { setSessionCookie } from './auth.cookie.js';
 import type { AuthService } from './auth.service.js';
-import { createOAuthState, type GoogleOAuth } from './google.js';
+import { createOAuthState, createPkceVerifier, pkceChallenge, type GoogleOAuth } from './google.js';
 
 const OAUTH_STATE_COOKIE = 'cube_coach_oauth_state';
+
+/**
+ * The flow cookie holds the state and the PKCE verifier together, as `state.verifier`.
+ * Both are base64url, whose alphabet has no `.`, so the split is unambiguous.
+ */
+function readFlowCookie(value: string | undefined): { state: string; verifier: string } | null {
+  const parts = value?.split('.');
+  if (parts?.length !== 2 || parts[0] === '' || parts[1] === '') return null;
+  return { state: parts[0]!, verifier: parts[1]! };
+}
 
 const callbackSchema = z.object({
   code: z.string().min(1),
@@ -28,8 +38,9 @@ export function registerGoogleRoutes(
    */
   app.get('/auth/google', (_request, reply) => {
     const state = createOAuthState();
+    const verifier = createPkceVerifier();
 
-    void reply.setCookie(OAUTH_STATE_COOKIE, state, {
+    void reply.setCookie(OAUTH_STATE_COOKIE, `${state}.${verifier}`, {
       httpOnly: true,
       secure: isProduction,
       // Google's redirect back to us is a cross-site navigation, and a Lax cookie is sent
@@ -39,23 +50,23 @@ export function registerGoogleRoutes(
       maxAge: 600,
     });
 
-    return reply.redirect(google.authorizationUrl(state));
+    return reply.redirect(google.authorizationUrl(state, pkceChallenge(verifier)));
   });
 
   /** Google sends the browser back here with a code. */
   app.get('/auth/google/callback', async (request, reply) => {
-    const expected = request.cookies[OAUTH_STATE_COOKIE];
+    const flow = readFlowCookie(request.cookies[OAUTH_STATE_COOKIE]);
     const parsed = callbackSchema.safeParse(request.query);
 
     // Clear it either way: a state value is good for exactly one attempt.
     void reply.clearCookie(OAUTH_STATE_COOKIE, { path: '/' });
 
-    if (!parsed.success || expected === undefined || parsed.data.state !== expected) {
+    if (!parsed.success || flow === null || parsed.data.state !== flow.state) {
       return reply.redirect('/login?error=google_state');
     }
 
     try {
-      const profile = await google.fetchProfile(parsed.data.code);
+      const profile = await google.fetchProfile(parsed.data.code, flow.verifier);
       const { token } = await authService.signInWithGoogle(
         profile,
         request.headers['user-agent'] ?? null,

@@ -1,7 +1,8 @@
+import type { Writable } from 'node:stream';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import type { Config } from './config.js';
 import { registerHealthRoutes } from './modules/health/health.routes.js';
@@ -59,6 +60,8 @@ export interface BuildAppOptions {
    * or a network. When given, the Google routes are registered regardless of config.
    */
   readonly google?: GoogleOAuth;
+  /** Where log lines go instead of stdout, so tests can assert on what is logged. */
+  readonly logStream?: Writable;
 }
 
 /**
@@ -82,6 +85,23 @@ function trustedProxyHops(hops: number) {
 }
 
 /**
+ * What each request contributes to the log: Fastify's default fields, minus the query
+ * string (and the source port, which behind a proxy is only the proxy's connection).
+ *
+ * Query strings can carry secrets. The Google callback's carries a live authorization
+ * code, and logs are kept, shipped to aggregators and read by more people than the
+ * database is. Paths are enough to debug with; nothing here needs the query to be logged.
+ */
+function serializeRequestForLog(request: FastifyRequest) {
+  return {
+    method: request.method,
+    url: request.url.split('?')[0] ?? request.url,
+    host: request.host,
+    remoteAddress: request.ip,
+  };
+}
+
+/**
  * Build the application.
  *
  * This is a factory rather than a module-level singleton, and that choice is what makes
@@ -96,15 +116,18 @@ export async function buildApp({
   rateLimit: limits,
   webRoot,
   google: googleOverride,
+  logStream,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: config.LOG_LEVEL,
       // Development logs are for a human reading a terminal; production logs are JSON
       // for a log aggregator to index.
-      ...(config.NODE_ENV === 'development'
+      ...(config.NODE_ENV === 'development' && logStream === undefined
         ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
         : {}),
+      ...(logStream === undefined ? {} : { stream: logStream }),
+      serializers: { req: serializeRequestForLog },
     },
     // Trust X-Forwarded-For only in production, where there is a load balancer, and only
     // as many hops as there are proxies. Rate limiting keys on the client IP this produces.
