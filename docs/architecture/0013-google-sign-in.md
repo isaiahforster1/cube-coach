@@ -4,6 +4,11 @@
 
 Accepted — 2026-09-19
 
+Amended by [ADR-0018](0018-authorisation-and-identity-rules.md) — 2026-09-26. The
+verification check below is necessary but not sufficient. Registration does not verify
+email, so linking also discards the account's password and sessions, and an account
+already linked to one Google subject is never re-linked to another.
+
 ## Context
 
 Email and password works, and it is friction. Someone who wants their solves kept has to
