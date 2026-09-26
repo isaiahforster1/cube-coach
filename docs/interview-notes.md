@@ -2024,3 +2024,23 @@ safe option.
 
 > "An unverified credential never survives a link. If you want to keep your password, the
 > product has to have checked it first."
+
+### What happens when an email address is recycled?
+
+A workspace administrator can take `alex@company.com` from one employee and give it to the
+next. The new holder signs in with Google and presents the same email with a different
+**subject**, Google's permanent account ID.
+
+The old code found the account by email and overwrote its `googleId`, so the newcomer got
+the previous holder's account and solve history. That contradicted ADR-0013, which exists to
+match on subject precisely because email is not stable.
+
+Now linking by email only happens when the account has no Google identity yet. An account
+already linked to a different subject is refused with `409 GOOGLE_ACCOUNT_MISMATCH`, and
+the browser is sent back to the login page with a message saying so.
+
+Telling the person why does not leak much. To see the message they must hold a verified
+Google account for that exact address, so they already know the address is theirs today.
+
+> "Subject is identity, email is contact information. Email can find an account that has no
+> Google identity yet. It can never replace one."

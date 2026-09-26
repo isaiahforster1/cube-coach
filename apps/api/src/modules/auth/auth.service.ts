@@ -76,7 +76,8 @@ export function createAuthService(repository: AuthRepository) {
      * Sign in with Google, creating or linking an account as needed.
      *
      * Three cases, in order: an account already linked to this Google subject; an account
-     * with the same email, which gets linked; or a new account.
+     * with the same email and no Google account yet, which gets linked; or a new account.
+     * An account with the same email but a different Google subject is refused.
      *
      * Linking by email is only safe because Google is asked whether the address is
      * verified, and an unverified one is refused outright. Without that check, anyone who
@@ -107,6 +108,18 @@ export function createAuthService(repository: AuthRepository) {
       }
 
       const existing = await repository.findUserByEmail(profile.email);
+      if (existing !== null && existing.googleId !== null) {
+        // The address already belongs to a different Google account. Most likely it was
+        // reassigned — a workspace administrator gave it to someone new — and the newcomer
+        // has no claim on the previous holder's history. Accounts are matched on subject,
+        // not email (ADR-0013), so this is refused rather than re-linked.
+        throw new ApiError(
+          409,
+          'GOOGLE_ACCOUNT_MISMATCH',
+          'That email address is already linked to a different Google account',
+        );
+      }
+
       if (existing !== null) {
         const user = await repository.linkGoogleAccount(existing.id, profile.sub, new Date());
         return { user, token: await this.startSession(user.id, userAgent) };

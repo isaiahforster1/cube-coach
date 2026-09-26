@@ -12,6 +12,10 @@ const MESSAGES: Record<string, string> = {
   google_state:
     'That sign-in link had expired or did not match. Please try signing in with Google again.',
   google_failed: 'Google sign-in did not complete. You can try again, or use a password.',
+  google_unverified:
+    'Your Google account does not have a verified email address, so it cannot be used to sign in.',
+  google_account_mismatch:
+    'That email address already belongs to a CubeCoach account linked to a different Google account.',
 };
 
 export function OAuthErrorNotice(): ReactElement | null {

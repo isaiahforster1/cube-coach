@@ -182,6 +182,24 @@ describe('signing in with Google', () => {
     expect(user.googleId).toBeNull();
   });
 
+  /**
+   * A recycled address. A workspace administrator can hand an email to someone new, who
+   * gets a different Google subject. Linking by email would give them the previous
+   * holder's account; ADR-0013 matches on subject precisely so that cannot happen.
+   */
+  it('refuses a second Google account arriving with an already-linked email', async () => {
+    const original = await authService.signInWithGoogle(profile({ sub: 'subject-1' }), null);
+
+    await expect(
+      authService.signInWithGoogle(profile({ sub: 'subject-2' }), null),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'GOOGLE_ACCOUNT_MISMATCH' });
+
+    const user = await context.prisma.user.findUniqueOrThrow({ where: { id: original.user.id } });
+    expect(user.googleId).toBe('subject-1');
+    expect(await context.prisma.user.count()).toBe(1);
+    expect(await context.prisma.authSession.count()).toBe(1);
+  });
+
   /** Matching on the subject, not the email, so a reassigned address cannot hijack a login. */
   it('recognises the account by Google subject even if the email changed', async () => {
     const first = await authService.signInWithGoogle(profile(), null);

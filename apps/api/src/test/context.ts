@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { buildApp } from '../app.js';
 import { loadConfig } from '../config.js';
 import { createPrismaClient } from '../db.js';
+import type { GoogleOAuth } from '../modules/auth/google.js';
 
 export interface TestContext {
   readonly app: FastifyInstance;
@@ -19,6 +20,8 @@ export interface CreateTestContextOptions {
   readonly webRoot?: string;
   /** Run as production would, for the headers that only appear there. */
   readonly production?: boolean;
+  /** A fake Google, which also switches the Google routes on. */
+  readonly google?: GoogleOAuth;
 }
 
 /**
@@ -55,6 +58,7 @@ export async function createTestContext(
       credentialMax: options.rateLimit?.credentialMax ?? 100_000,
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
+    ...(options.google === undefined ? {} : { google: options.google }),
   });
   await app.ready();
 

@@ -8,7 +8,7 @@ import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 import { createAuthService } from './modules/auth/auth.service.js';
-import { createGoogleOAuth } from './modules/auth/google.js';
+import { createGoogleOAuth, type GoogleOAuth } from './modules/auth/google.js';
 import { registerAuthProviderRoutes, registerGoogleRoutes } from './modules/auth/google.routes.js';
 import { createPracticeSessionsRepository } from './modules/practice-sessions/practice-sessions.repository.js';
 import { registerPracticeSessionRoutes } from './modules/practice-sessions/practice-sessions.routes.js';
@@ -52,6 +52,11 @@ export interface BuildAppOptions {
    * which have no build to serve.
    */
   readonly webRoot?: string;
+  /**
+   * Stand in for Google, so tests can drive the whole sign-in flow without credentials
+   * or a network. When given, the Google routes are registered regardless of config.
+   */
+  readonly google?: GoogleOAuth;
 }
 
 /**
@@ -68,6 +73,7 @@ export async function buildApp({
   prisma,
   rateLimit: limits,
   webRoot,
+  google: googleOverride,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -134,7 +140,7 @@ export async function buildApp({
         }
       : null;
 
-  const google = googleConfig === null ? null : createGoogleOAuth(googleConfig);
+  const google = googleOverride ?? (googleConfig === null ? null : createGoogleOAuth(googleConfig));
 
   const practiceSessionsRepository = createPracticeSessionsRepository(prisma);
   const practiceSessionsService = createPracticeSessionsService(practiceSessionsRepository);

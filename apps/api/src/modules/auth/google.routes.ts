@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { ApiError } from '../../plugins/error-handler.js';
 import { setSessionCookie } from './auth.cookie.js';
 import type { AuthService } from './auth.service.js';
 import { createOAuthState, type GoogleOAuth } from './google.js';
@@ -66,9 +67,21 @@ export function registerGoogleRoutes(
       request.log.error({ err: error }, 'Google sign-in failed');
       // Back to the login page with a marker rather than an API error page: the browser
       // is mid-navigation here, and a JSON body would be shown to the user raw.
-      return reply.redirect(`${app.config.WEB_ORIGIN}/login?error=google_failed`);
+      return reply.redirect(`${app.config.WEB_ORIGIN}/login?error=${callbackErrorMarker(error)}`);
     }
   });
+}
+
+/**
+ * The marker the login page turns into a message. Only refusals the user can act on get
+ * their own; anything unexpected stays generic, so internals are never described.
+ */
+function callbackErrorMarker(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === 'GOOGLE_ACCOUNT_MISMATCH') return 'google_account_mismatch';
+    if (error.code === 'GOOGLE_EMAIL_UNVERIFIED') return 'google_unverified';
+  }
+  return 'google_failed';
 }
 
 /** Lets the client know which sign-in options actually exist. */
