@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { createPracticeSessionRequestSchema } from '@cube-coach/shared';
+import { createPracticeSessionRequestSchema, idParamsSchema } from '@cube-coach/shared';
 import { currentUser } from '../../plugins/authenticate.js';
 import type { PracticeSessionsService } from './practice-sessions.service.js';
 
@@ -20,8 +20,9 @@ export function registerPracticeSessionRoutes(
     return reply.status(201).send({ practiceSession: session });
   });
 
-  app.delete<{ Params: { id: string } }>('/practice-sessions/:id', auth, async (request, reply) => {
-    const session = await service.archive(currentUser(request).id, request.params.id);
+  app.delete('/practice-sessions/:id', auth, async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params);
+    const session = await service.archive(currentUser(request).id, id);
     return reply.send({ practiceSession: session });
   });
 }

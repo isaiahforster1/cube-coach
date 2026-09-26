@@ -2148,3 +2148,22 @@ could only send one they had already obtained, and nothing about the solve is re
 
 > "An idempotency key identifies a request, not a permission. Every lookup by id also
 > checks who is asking, including the ones hidden inside a write."
+
+### Why validate a path parameter when the database would reject a bad one anyway?
+
+It did reject it, as a 500. Postgres refuses `not-a-uuid` as a `uuid` value, the driver
+throws, and the error handler treats an unexpected exception as a bug in the server. So a
+typo in a URL was reported as a crash, it was logged as one, and in development the
+response carried the database's error message.
+
+Letting the database be the validator means its error handling becomes your API's error
+handling. A zod schema at the edge makes the id a checked input like the body and the
+query: a malformed one is a 400 `VALIDATION_FAILED`, and the handler receives a value
+whose type came from the check rather than from a type annotation nobody verifies.
+
+`Params: { id: string }` in the old route signatures was exactly that kind of annotation.
+It told TypeScript the id was a string, which is always true of a path segment, and said
+nothing about whether it was an id.
+
+> "A type annotation on request input is a promise nobody checks. Parse it, and the type
+> comes from the check."

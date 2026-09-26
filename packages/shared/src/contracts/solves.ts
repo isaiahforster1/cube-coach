@@ -8,6 +8,14 @@ import { z } from 'zod';
 
 export const penaltySchema = z.enum(['none', 'plus2', 'dnf']);
 
+/**
+ * The `:id` in a route like `/solves/:id`.
+ *
+ * Path parameters are input like any other. Every id in this API is a UUID, and checking
+ * that here turns a malformed one into a 400 at the edge instead of a database error.
+ */
+export const idParamsSchema = z.object({ id: z.uuid() });
+
 export const practiceSessionSchema = z.object({
   id: z.uuid(),
   name: z.string(),

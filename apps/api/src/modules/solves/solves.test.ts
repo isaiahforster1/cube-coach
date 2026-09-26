@@ -270,6 +270,30 @@ describe('one user cannot reach another user’s data', () => {
   });
 });
 
+/**
+ * A path parameter is input like any other. Unchecked, a malformed id reached Postgres,
+ * which refused it as a uuid, and the client saw a 500: a crash report for a typo, and a
+ * database error message in development.
+ */
+describe('malformed ids in the path', () => {
+  it.each([
+    ['PATCH', '/api/v1/solves/not-a-uuid', { penalty: 'dnf' }],
+    ['DELETE', '/api/v1/solves/not-a-uuid', undefined],
+    ['POST', '/api/v1/solves/not-a-uuid/restore', undefined],
+    ['DELETE', '/api/v1/practice-sessions/not-a-uuid', undefined],
+  ] as const)('%s %s is a 400', async (method, url, payload) => {
+    const response = await context.app.inject({
+      method,
+      url,
+      cookies: { [SESSION_COOKIE]: cookie },
+      ...(payload === undefined ? {} : { payload }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_FAILED');
+  });
+});
+
 describe('PATCH /solves/:id', () => {
   it('applies a penalty after the fact', async () => {
     const created = await postSolve(solvePayload());

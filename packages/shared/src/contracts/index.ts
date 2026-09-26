@@ -13,6 +13,7 @@ export {
   createPracticeSessionRequestSchema,
   createSolveRequestSchema,
   createSolvesBatchRequestSchema,
+  idParamsSchema,
   listSolvesQuerySchema,
   MAX_SOLVES_PER_BATCH,
   penaltySchema,

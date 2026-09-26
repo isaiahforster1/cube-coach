@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   createSolveRequestSchema,
   createSolvesBatchRequestSchema,
+  idParamsSchema,
   listSolvesQuerySchema,
   updateSolveRequestSchema,
 } from '@cube-coach/shared';
@@ -92,19 +93,22 @@ export function registerSolveRoutes(
     return reply.send(page);
   });
 
-  app.patch<{ Params: { id: string } }>('/solves/:id', auth, async (request, reply) => {
+  app.patch('/solves/:id', auth, async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params);
     const input = updateSolveRequestSchema.parse(request.body);
-    const solve = await service.update(currentUser(request).id, request.params.id, input);
+    const solve = await service.update(currentUser(request).id, id, input);
     return reply.send({ solve });
   });
 
-  app.post<{ Params: { id: string } }>('/solves/:id/restore', auth, async (request, reply) => {
-    const solve = await service.restore(currentUser(request).id, request.params.id);
+  app.post('/solves/:id/restore', auth, async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params);
+    const solve = await service.restore(currentUser(request).id, id);
     return reply.send({ solve });
   });
 
-  app.delete<{ Params: { id: string } }>('/solves/:id', auth, async (request, reply) => {
-    await service.remove(currentUser(request).id, request.params.id);
+  app.delete('/solves/:id', auth, async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params);
+    await service.remove(currentUser(request).id, id);
     return reply.status(204).send();
   });
 }
