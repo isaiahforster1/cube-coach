@@ -2205,3 +2205,26 @@ which is true on Railway, and the comment says so.
 
 > "Test the fix in both directions: the attack fails _and_ legitimate users are still told
 > apart. A rate limiter that puts everyone in one bucket 'passes' the first test."
+
+### Why add "sign out everywhere" if logout already revokes sessions server-side?
+
+Logout ends one session, the one making the request. A user who has lost a phone, or who
+suspects someone else is signed in, has no way to reach the sessions they cannot see, and
+those are exactly the ones that matter. `POST /auth/logout-all` revokes every session the
+user has, their own included, and clears the cookie.
+
+It is the same property that justified server-side sessions in ADR-0006. With a JWT, every
+issued token stays valid until it expires, and there is nothing to revoke. With stored
+sessions it is one `UPDATE ... WHERE user_id = ?`.
+
+Unlike plain logout, it requires a valid session. Logout acts on a token the caller holds;
+logout-all acts on an _account_, so it has to know whose, and must not let anyone sign
+anyone else out.
+
+The comment on the session length also said it lasted thirty days "without activity",
+which described an idle timeout. The code sets an absolute expiry at creation, and
+activity never extends it. The difference matters: an absolute expiry bounds how long a
+stolen token works, even if the thief keeps using it.
+
+> "A session store's real advantage is revocation, so give users a way to use it. And
+> know whether your expiry is absolute or idle; they protect against different things."

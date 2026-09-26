@@ -73,6 +73,20 @@ export function registerAuthRoutes(
     return reply.status(204).send();
   });
 
+  /**
+   * Sign out everywhere: after a lost device or a suspected compromise, end every login
+   * the user cannot see.
+   *
+   * Unlike logout, this requires a valid session. It acts on an account rather than on a
+   * token, so it has to know whose — and it must not let anyone sign anyone else out.
+   */
+  app.post('/auth/logout-all', { preHandler: app.requireAuth }, async (request, reply) => {
+    await authService.logoutEverywhere(currentUser(request).id);
+
+    clearSessionCookie(reply, isProduction);
+    return reply.status(204).send();
+  });
+
   app.get('/auth/me', { preHandler: app.requireAuth }, (request) => ({
     user: toPublicUser(currentUser(request)),
   }));

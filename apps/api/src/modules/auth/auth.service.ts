@@ -153,6 +153,11 @@ export function createAuthService(repository: AuthRepository) {
       await repository.revokeSession(hashSessionToken(token), new Date());
     },
 
+    /** Revoke every session the user has, on every device, including the caller's own. */
+    async logoutEverywhere(userId: string): Promise<void> {
+      await repository.revokeAllSessionsForUser(userId, new Date());
+    },
+
     /**
      * Resolve a session token to a user, or null if it is unusable for any reason.
      *

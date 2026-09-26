@@ -287,6 +287,62 @@ describe('POST /auth/logout', () => {
   });
 });
 
+/**
+ * After a lost phone or a suspected compromise, the one thing a user needs is to end every
+ * login they cannot see. Logging out only ends the session making the request.
+ */
+describe('POST /auth/logout-all', () => {
+  function me(token: string) {
+    return context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [SESSION_COOKIE]: token },
+    });
+  }
+
+  function logoutAll(token?: string) {
+    return context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout-all',
+      ...(token === undefined ? {} : { cookies: { [SESSION_COOKIE]: token } }),
+    });
+  }
+
+  it('ends every session the user has, including this one', async () => {
+    const laptop = sessionCookie(await register());
+    const phone = sessionCookie(await login());
+
+    const response = await logoutAll(laptop);
+
+    expect(response.statusCode).toBe(204);
+    expect((await me(laptop)).statusCode).toBe(401);
+    expect((await me(phone)).statusCode).toBe(401);
+  });
+
+  it('clears the cookie in this browser', async () => {
+    const token = sessionCookie(await register());
+
+    const response = await logoutAll(token);
+    const cleared = response.cookies.find((cookie) => cookie.name === SESSION_COOKIE);
+
+    expect(cleared?.value).toBe('');
+  });
+
+  it('leaves other users signed in', async () => {
+    const mine = sessionCookie(await register());
+    const theirs = sessionCookie(await register({ email: 'someone-else@example.com' }));
+
+    await logoutAll(mine);
+
+    expect((await me(theirs)).statusCode).toBe(200);
+  });
+
+  /** Otherwise anyone could sign anyone out by sending the request. */
+  it('requires a signed-in user', async () => {
+    expect((await logoutAll()).statusCode).toBe(401);
+  });
+});
+
 describe('rate limiting', () => {
   it('rejects repeated credential attempts with 429', async () => {
     const limited = await createTestContext({ rateLimit: { credentialMax: 3 } });
