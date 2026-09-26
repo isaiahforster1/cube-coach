@@ -62,6 +62,26 @@ export interface BuildAppOptions {
 }
 
 /**
+ * Trust exactly `hops` proxies in front of this process, and no more.
+ *
+ * A proxy that appends to X-Forwarded-For leaves whatever the client sent on the left and
+ * adds the address it actually saw on the right. `trustProxy: true` trusts every entry and
+ * takes the leftmost, which is the client's own claim — so a forged value per request was
+ * a fresh rate-limit bucket per request. Trusting one hop takes the entry our proxy wrote.
+ *
+ * A function rather than the number itself, deliberately. Fastify 5 treats a numeric
+ * `trustProxy` as "trust nothing", which would make every request appear to come from the
+ * load balancer and put all users in a single rate-limit bucket.
+ *
+ * This relies on the process being reachable only through that proxy, which is how the
+ * platform runs it. If another proxy is added in front, a CDN for example, `hops` has to go
+ * up with it.
+ */
+function trustedProxyHops(hops: number) {
+  return (_address: string, hop: number): boolean => hop < hops;
+}
+
+/**
  * Build the application.
  *
  * This is a factory rather than a module-level singleton, and that choice is what makes
@@ -86,10 +106,9 @@ export async function buildApp({
         ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
         : {}),
     },
-    // Trust the load balancer's X-Forwarded-For only in production, where there is one.
-    // Trusting it in development would let any client spoof its own IP — and rate
-    // limiting keys on that IP.
-    trustProxy: config.NODE_ENV === 'production',
+    // Trust X-Forwarded-For only in production, where there is a load balancer, and only
+    // as many hops as there are proxies. Rate limiting keys on the client IP this produces.
+    trustProxy: config.NODE_ENV === 'production' ? trustedProxyHops(1) : false,
     // A solve payload is a few hundred bytes. Anything approaching this is a mistake
     // or an attempt, and rejecting it early costs nothing.
     bodyLimit: 64 * 1024,

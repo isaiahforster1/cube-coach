@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestContext, type TestContext } from '../../test/context.js';
 import { SESSION_COOKIE } from './auth.cookie.js';
 
@@ -310,6 +310,48 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+/**
+ * Behind a load balancer the client's address arrives in X-Forwarded-For. A proxy that
+ * appends to the header leaves whatever the client sent on the left and adds the address
+ * it actually saw on the right, so only the rightmost entry — the one our own proxy
+ * wrote — can be believed. Trusting every hop takes the leftmost, which the client chose.
+ */
+describe('rate limiting behind a proxy', () => {
+  let limited: TestContext;
+
+  beforeAll(async () => {
+    limited = await createTestContext({ production: true, rateLimit: { credentialMax: 3 } });
+  });
+
+  afterAll(async () => {
+    await limited.close();
+  });
+
+  const attemptFrom = (forwardedFor: string) =>
+    limited.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      // The proxy's own address, as the socket sees it.
+      remoteAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': forwardedFor },
+      payload: { email: 'nobody@example.com', password: 'wrong-password-here' },
+    });
+
+  it('cannot be dodged by forging the left of X-Forwarded-For', async () => {
+    const statuses = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      statuses.push((await attemptFrom(`203.0.113.${attempt}, 198.51.100.50`)).statusCode);
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429, 429]);
+  });
+
+  it('still tells real clients apart', async () => {
+    const response = await attemptFrom('198.51.100.99');
+    expect(response.statusCode).toBe(401);
   });
 });
 

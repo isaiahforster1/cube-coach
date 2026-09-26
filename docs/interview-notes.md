@@ -2167,3 +2167,41 @@ nothing about whether it was an id.
 
 > "A type annotation on request input is a promise nobody checks. Parse it, and the type
 > comes from the check."
+
+### How could someone get unlimited login attempts past the rate limiter?
+
+By writing their own IP address. Behind a load balancer the socket address is the load
+balancer's, so the client's real address arrives in `X-Forwarded-For`. A proxy that
+_appends_ to that header keeps whatever the client sent and adds the address it saw:
+
+```
+X-Forwarded-For: 203.0.113.7, 198.51.100.50
+                 ^ client wrote this   ^ our proxy wrote this
+```
+
+`trustProxy: true` believes every entry and takes the leftmost, the client's claim. A
+different forged value on each request meant a fresh rate-limit bucket each time. Only
+entries written by proxies you run can be believed, so you count your proxies from the
+right. Railway happened to overwrite the header, so production was fine, but only because
+of a platform detail nobody had written down.
+
+> "X-Forwarded-For is read right to left. Each entry is only as trustworthy as whoever
+> wrote it, and the leftmost one was written by the client."
+
+### Why a trust function instead of `trustProxy: 1`?
+
+Because in Fastify 5, `1` doesn't mean one hop. A numeric `trustProxy` trusts _nothing_,
+so `request.ip` is always the socket address, which is the load balancer. Every user would
+have shared one rate-limit bucket, and ten failed logins anywhere would have locked
+everybody out for fifteen minutes.
+
+The regression test that proved the forged header was ignored passed with `1`. What caught
+it was a second test asserting that two real clients still get separate buckets. A security
+fix needs a test for the thing it must not break as well as the thing it must stop.
+
+`(address, hop) => hop < 1` says what is meant: trust the immediate peer, our proxy, and
+nothing behind it. That relies on the container being reachable only through the proxy,
+which is true on Railway, and the comment says so.
+
+> "Test the fix in both directions: the attack fails _and_ legitimate users are still told
+> apart. A rate limiter that puts everyone in one bucket 'passes' the first test."
