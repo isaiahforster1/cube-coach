@@ -2276,3 +2276,31 @@ implementation was right and the test data was wrong.
 
 > "When a known-answer test fails, check the known answer first. It's data, and data typed
 > from memory is the least reliable part of the test."
+
+### Why should the application's database role not be able to change the schema?
+
+Least privilege. The running application reads and writes rows and nothing else. Only
+migrations create, alter or drop tables. When one role does both, any way of making the
+application run SQL it did not intend, whether an injection bug, a compromised dependency
+or a leaked connection string, can also `DROP TABLE solves`.
+
+So there are two connections. `DATABASE_URL` is a role with `SELECT, INSERT, UPDATE,
+DELETE` only. `MIGRATION_DATABASE_URL` is the schema owner, used by `migrate deploy` and
+nothing else.
+
+Three details carry the design:
+
+- **The fallback lives in the start script, not in `prisma.config.ts`.** The test setup runs
+  `migrate deploy` against the test database through `DATABASE_URL`. Had the config
+  preferred `MIGRATION_DATABASE_URL`, a developer with it in their `.env` would have had
+  their tests migrate the wrong database.
+- **The server never inherits the privileged URL.** It is set as a prefix on the one prisma
+  command, and unset before `exec node`. Environment variables are easy to leak through
+  crash reports, debug endpoints or a child process.
+- **`ALTER DEFAULT PRIVILEGES`.** Granting on `ALL TABLES` covers the tables that exist
+  today. Tables created by the next migration need default privileges, set for the role
+  that runs migrations, or the first deploy with a new table breaks the app. This was
+  checked on a throwaway local database before it went into the docs.
+
+> "The app gets rows, the migrator gets schema. Grants cover today's tables; default
+> privileges cover tomorrow's."

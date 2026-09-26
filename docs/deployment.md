@@ -22,18 +22,19 @@ Set on the service. Everything is validated at startup, so a missing or malforme
 fails immediately with the name of the variable rather than surfacing on some later
 request.
 
-| Variable               | Required | Value                                                                 |
-| ---------------------- | -------- | --------------------------------------------------------------------- |
-| `NODE_ENV`             | yes      | `production` — switches on secure cookies, HSTS and JSON logs         |
-| `DATABASE_URL`         | yes      | The Postgres connection string                                        |
-| `PORT`                 | usually  | Whatever the platform expects; defaults to 3000                       |
-| `HOST`                 | yes      | `0.0.0.0`, or the container is unreachable from outside itself        |
-| `WEB_ORIGIN`           | no       | Leave unset. See below                                                |
-| `WEB_ROOT`             | no       | Defaults to the built client next to the API                          |
-| `LOG_LEVEL`            | no       | `info`                                                                |
-| `GOOGLE_CLIENT_ID`     | no       | From the Google Cloud OAuth client                                    |
-| `GOOGLE_CLIENT_SECRET` | no       | From the same place                                                   |
-| `GOOGLE_REDIRECT_URI`  | no       | `https://<host>/api/v1/auth/google/callback`, character for character |
+| Variable                 | Required | Value                                                                 |
+| ------------------------ | -------- | --------------------------------------------------------------------- |
+| `NODE_ENV`               | yes      | `production` — switches on secure cookies, HSTS and JSON logs         |
+| `DATABASE_URL`           | yes      | The Postgres connection string the application uses                   |
+| `MIGRATION_DATABASE_URL` | no       | A more privileged connection for migrations only. See below           |
+| `PORT`                   | usually  | Whatever the platform expects; defaults to 3000                       |
+| `HOST`                   | yes      | `0.0.0.0`, or the container is unreachable from outside itself        |
+| `WEB_ORIGIN`             | no       | Leave unset. See below                                                |
+| `WEB_ROOT`               | no       | Defaults to the built client next to the API                          |
+| `LOG_LEVEL`              | no       | `info`                                                                |
+| `GOOGLE_CLIENT_ID`       | no       | From the Google Cloud OAuth client                                    |
+| `GOOGLE_CLIENT_SECRET`   | no       | From the same place                                                   |
+| `GOOGLE_REDIRECT_URI`    | no       | `https://<host>/api/v1/auth/google/callback`, character for character |
 
 ### Why `WEB_ORIGIN` should stay unset
 
@@ -62,19 +63,83 @@ is, and that has to be the page the user started on.
 
 ## Database migrations
 
-The database starts empty, and the service fails its readiness check until the tables
-exist.
+The container migrates on every start, before it serves anything. `apps/api/scripts/start.sh`
+runs `prisma migrate deploy` and then starts the server, and nothing needs to be configured
+on the platform for it. There is no pre-deploy command; if one was set up for an earlier
+version, remove it, because the migrations would simply run twice.
 
-Set this as the platform's **pre-deploy command**, so it runs against the production
-database before the new container takes traffic:
+`migrate deploy` only applies migrations that already exist. It never generates one and
+never prompts, which is what makes it safe to run unattended. If it fails, the container
+exits instead of serving against a schema the code does not understand. The Prisma CLI is
+a runtime dependency rather than a development one for exactly this reason.
 
-```bash
-cd /app/apps/api && ./node_modules/.bin/prisma migrate deploy
-```
+## A database role that cannot change the schema
 
-`migrate deploy` only applies migrations that already exist — it never generates one and
-never prompts — which is what makes it safe to run unattended. The Prisma CLI is a
-runtime dependency rather than a development one for exactly this reason.
+Migrations need to create, alter and drop tables. The running application only ever reads
+and writes rows. If both use the same role, then any way of making the application run SQL
+it did not intend, whether an injection bug or a compromised dependency, can also drop the
+tables.
+
+So the two can use different connections:
+
+- `DATABASE_URL` is a role with `SELECT`, `INSERT`, `UPDATE` and `DELETE` only.
+- `MIGRATION_DATABASE_URL` is the role that owns the schema, used for `migrate deploy`
+  alone. The start script passes it to that one command and removes it from the
+  environment before the server starts.
+
+Without `MIGRATION_DATABASE_URL`, migrations use `DATABASE_URL`, which is how a
+single-role deployment keeps working.
+
+### Setting it up on Railway
+
+This has to be done by hand, once. Railway's Postgres comes with one superuser,
+`postgres`, which owns every table the migrations have created so far.
+
+1. Open the Postgres service's **Data** tab (or connect with `psql` using its public
+   connection string) and run the following, choosing a long random password. It creates
+   the application role and gives it rows but not schema:
+
+   ```sql
+   CREATE ROLE cubecoach_app LOGIN PASSWORD '<a long random password>';
+
+   GRANT CONNECT ON DATABASE railway TO cubecoach_app;
+   GRANT USAGE ON SCHEMA public TO cubecoach_app;
+   REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+   -- Tables and sequences that exist now.
+   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cubecoach_app;
+   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO cubecoach_app;
+
+   -- Tables that future migrations create. Migrations run as postgres, so the
+   -- defaults are set for objects postgres creates.
+   ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cubecoach_app;
+   ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+     GRANT USAGE, SELECT ON SEQUENCES TO cubecoach_app;
+   ```
+
+   The database is called `railway` unless it was renamed. `PGDATABASE` on the Postgres
+   service says for certain.
+
+2. On the application service, add `MIGRATION_DATABASE_URL` as a reference to the
+   Postgres service's own URL, `${{Postgres.DATABASE_URL}}`. This is the connection it
+   uses today, so nothing changes yet.
+
+3. Change `DATABASE_URL` on the application service to the new role, keeping the host,
+   port and database from the Postgres service:
+
+   ```
+   postgresql://cubecoach_app:<password>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}
+   ```
+
+4. Deploy, then check that `GET /health/ready` returns `ready` and that a solve saves.
+
+Doing step 2 before step 3 means there is never a deploy where migrations run as the
+restricted role, which would fail.
+
+To confirm the restriction, connect as `cubecoach_app` and run
+`CREATE TABLE should_fail (id int);`. It should fail with "permission denied for schema
+public".
 
 ## Automatic deploys
 
@@ -113,7 +178,8 @@ before calling the release complete.
 
 1. `pnpm run check` passes.
 2. `pnpm --filter @cube-coach/web build` succeeds.
-3. Migrations applied to the production database.
+3. Migrations applied to the production database. The container does this itself on
+   start; a failed migration shows up as a container that exits.
 4. Container deployed with the environment above.
 5. `GET /health/ready` returns `ready`.
 6. Open the site: a scramble appears, the timer runs, a solve saves.

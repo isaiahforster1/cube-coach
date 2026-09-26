@@ -64,6 +64,7 @@ COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 # Kept for `db:deploy`, which applies migrations as part of a release.
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
+COPY --from=build /app/apps/api/scripts/start.sh ./apps/api/scripts/start.sh
 # Only the built client, not its source or its dependencies.
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 
@@ -77,7 +78,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
 
 WORKDIR /app/apps/api
 
-# Migrate, then serve.
+# Migrate, then serve, in scripts/start.sh.
 #
 # The alternative is a separate release step, which is what you want once there are
 # several instances and a deploy has to be zero-downtime: migrations run once, then the
@@ -92,4 +93,8 @@ WORKDIR /app/apps/api
 #
 # Concurrent starts are safe: Prisma takes an advisory lock, so a second container waits
 # rather than applying the same migration twice.
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/server.js"]
+#
+# Migrations may use a more privileged database role than the application, through
+# MIGRATION_DATABASE_URL; the script keeps that connection away from the server. Run
+# with sh rather than executed directly, so a lost executable bit cannot break startup.
+CMD ["sh", "scripts/start.sh"]
