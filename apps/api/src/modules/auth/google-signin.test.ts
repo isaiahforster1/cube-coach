@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestContext, type TestContext } from '../../test/context.js';
+import { SESSION_COOKIE } from './auth.cookie.js';
 import { createAuthRepository } from './auth.repository.js';
 import { createAuthService, type AuthService } from './auth.service.js';
 import type { GoogleProfile } from './google.js';
@@ -25,6 +26,31 @@ function profile(overrides: Partial<GoogleProfile> = {}): GoogleProfile {
     name: 'Test Cuber',
     ...overrides,
   };
+}
+
+/** Register with a password over HTTP, as an attacker would, and return the session cookie. */
+async function registerWithPassword(): Promise<string> {
+  const response = await context.app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    payload: {
+      email: 'cuber@example.com',
+      password: 'a-long-enough-password',
+      displayName: 'Password Cuber',
+    },
+  });
+
+  const cookie = response.cookies.find((candidate) => candidate.name === SESSION_COOKIE);
+  if (cookie === undefined) throw new Error('No session cookie was set');
+  return cookie.value;
+}
+
+function me(token: string) {
+  return context.app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    cookies: { [SESSION_COOKIE]: token },
+  });
 }
 
 describe('signing in with Google', () => {
@@ -68,22 +94,45 @@ describe('signing in with Google', () => {
    * solve history in two.
    */
   it('links Google to an account that already has that email', async () => {
-    await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/register',
-      payload: {
-        email: 'cuber@example.com',
-        password: 'a-long-enough-password',
-        displayName: 'Password Cuber',
-      },
-    });
+    await registerWithPassword();
 
     const { user } = await authService.signInWithGoogle(profile(), null);
 
     expect(await context.prisma.user.count()).toBe(1);
     expect(user.googleId).toBe('google-subject-1');
-    // The password still works afterwards; linking adds a way in, it does not replace one.
-    expect(user.passwordHash).not.toBeNull();
+    // The password was never proved to belong to the address, so it does not survive the
+    // link. Google's verified email is the first real proof of ownership.
+    expect(user.passwordHash).toBeNull();
+  });
+
+  /**
+   * Account pre-hijacking. Registration does not verify the email, so an attacker can
+   * register the victim's address first and keep that session open. When the real owner
+   * later signs in with Google they are linked into the prepared account — and without
+   * this, the attacker's session and password would both still work.
+   */
+  it('revokes every session that existed before the link', async () => {
+    const attackerCookie = await registerWithPassword();
+    expect((await me(attackerCookie)).statusCode).toBe(200);
+
+    const { token: victimToken } = await authService.signInWithGoogle(profile(), null);
+
+    expect((await me(attackerCookie)).statusCode).toBe(401);
+    // The session started by the link itself is, of course, still good.
+    expect((await me(victimToken)).statusCode).toBe(200);
+  });
+
+  it('stops the pre-link password from signing in', async () => {
+    await registerWithPassword();
+    await authService.signInWithGoogle(profile(), null);
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'cuber@example.com', password: 'a-long-enough-password' },
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 
   it('keeps the original display name when linking', async () => {

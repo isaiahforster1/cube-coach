@@ -82,6 +82,12 @@ export function createAuthService(repository: AuthRepository) {
      * verified, and an unverified one is refused outright. Without that check, anyone who
      * could create a Google account claiming someone else's address could take over their
      * CubeCoach account — which is the classic way this integration goes wrong.
+     *
+     * The check covers only half of it. Registration does not verify email either, so the
+     * account being linked into may have been prepared by an attacker who registered the
+     * victim's address first ("pre-hijacking"). The verified Google identity is therefore
+     * the first real proof of ownership, and linking discards everything that came before
+     * it: the password is cleared and every existing session is revoked.
      */
     async signInWithGoogle(
       profile: GoogleProfile,
@@ -102,7 +108,7 @@ export function createAuthService(repository: AuthRepository) {
 
       const existing = await repository.findUserByEmail(profile.email);
       if (existing !== null) {
-        const user = await repository.linkGoogleAccount(existing.id, profile.sub);
+        const user = await repository.linkGoogleAccount(existing.id, profile.sub, new Date());
         return { user, token: await this.startSession(user.id, userAgent) };
       }
 

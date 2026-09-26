@@ -1969,3 +1969,58 @@ reports fine, which is right — it has a keyboard and its owner will use it.
 
 > "You can't ask whether there's a keyboard. You can ask whether the primary pointer is a
 > finger, which is the proxy the platform provides for exactly this."
+
+## Security review fixes
+
+Ten findings from a security review, fixed one commit at a time. Each has a regression test
+that was run and seen to fail before the fix went in.
+
+### What is account pre-hijacking, and how was CubeCoach open to it?
+
+The attacker gets to the account before its owner does. Registration here never proves that
+the person typing an email address owns it, so an attacker can register
+`victim@gmail.com` with a password of their own and simply leave that session open.
+
+Months later the real owner signs in with Google. Google says the address is verified, the
+email matches an existing account, and the sign-in links the two. The owner sees a normal
+account, starts saving solves, and the attacker is still inside it with a working session
+and a working password.
+
+The `email_verified` check did its job. It proved the _Google_ side of the link belonged to
+the address. Nothing had ever proved that the _CubeCoach_ side did, and linking treated both
+sides as trustworthy.
+
+> "Checking that Google verified the email proves who's arriving. It says nothing about who
+> set up the account they're arriving into."
+
+### What does the fix do, and why both halves?
+
+Linking by email now clears the password and revokes every existing session, in the same
+transaction that sets `googleId`.
+
+- **Clearing the password** closes the door the attacker would use next time.
+- **Revoking the sessions** closes the one they are already standing in. A session token is
+  a credential that outlives the password: changing or clearing the password does nothing
+  to a login that already happened. That is true of every "reset your password" flow too,
+  which is why a good one revokes sessions as well.
+
+The two writes share a transaction because the half-done state is the dangerous one. Linked
+but not revoked means the real owner's identity is on the account and a stranger is still
+signed into it.
+
+> "The password is the next way in. The session is the way they're already in. Either one
+> left behind means the fix didn't work."
+
+### Doesn't that punish a genuine user who registered with a password first?
+
+A little. They lose the password and have to sign in with Google from then on. The server
+cannot tell them apart from an attacker, because neither of them ever proved the address.
+The one thing the server knows for certain is that the Google sign-in owns the email, so
+that is the credential that survives.
+
+The proper long-term fix is to verify email at registration. Then a password would already
+have been proved, and linking could keep it. Until that exists, discarding it is the only
+safe option.
+
+> "An unverified credential never survives a link. If you want to keep your password, the
+> product has to have checked it first."

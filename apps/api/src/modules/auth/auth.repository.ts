@@ -23,8 +23,23 @@ export function createAuthRepository(prisma: PrismaClient) {
       return prisma.user.findUnique({ where: { googleId } });
     },
 
-    linkGoogleAccount(userId: string, googleId: string) {
-      return prisma.user.update({ where: { id: userId }, data: { googleId } });
+    /**
+     * Attach a Google identity to an existing account, discarding every credential that
+     * was never proved: the password is cleared and all existing sessions are revoked.
+     *
+     * One transaction, because the order of failure matters. Linking and then failing to
+     * revoke would leave exactly the state this exists to prevent — the account now holds
+     * the real owner's identity while a stranger's session still works.
+     */
+    async linkGoogleAccount(userId: string, googleId: string, now: Date) {
+      const [user] = await prisma.$transaction([
+        prisma.user.update({ where: { id: userId }, data: { googleId, passwordHash: null } }),
+        prisma.authSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: now },
+        }),
+      ]);
+      return user;
     },
 
     /** A Google account has no password, so it is created without one. */
