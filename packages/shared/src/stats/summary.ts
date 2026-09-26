@@ -3,7 +3,6 @@ import {
   type CrossDifficultyInsight,
   type ScrambledSolve,
 } from '../analysis/cross-insight.js';
-import { effectiveDurationMs } from '../timer/timer-machine.js';
 import { averageOf, bestAverageOf } from './averages.js';
 import { summariseConsistency } from './consistency.js';
 import type { AverageResult, ConsistencySummary } from './types.js';
@@ -12,6 +11,21 @@ import type { AverageResult, ConsistencySummary } from './types.js';
 export const AVERAGE_SIZES = [5, 12, 50, 100] as const;
 
 export type AverageSize = (typeof AVERAGE_SIZES)[number];
+
+/**
+ * The cross insight looks at the most recent solves only, and this is a product decision
+ * as much as a performance one.
+ *
+ * The question it answers is "do you currently give up planning the cross when it is
+ * hard?" — a habit, and habits change. Two years and forty thousand solves ago says
+ * little about today, and averaging it in would bury a change the cuber has made.
+ *
+ * It is also the one statistic that runs the cube engine on every scramble, around 50
+ * microseconds each at the longest scramble the API accepts. Unbounded, a large history
+ * blocked the event loop for seconds on every request; a thousand solves costs about 50ms
+ * at worst, and is still far above the minimum evidence the analysis requires.
+ */
+export const CROSS_ANALYSIS_WINDOW = 1000;
 
 export interface AveragePair {
   readonly current: AverageResult;
@@ -47,14 +61,12 @@ export function buildStatsSummary(solves: readonly ScrambledSolve[]): StatsSumma
     ]),
   ) as Record<`ao${AverageSize}`, AveragePair>;
 
-  const finished = solves
-    .map((solve) => effectiveDurationMs(solve.durationMs, solve.penalty))
-    .filter((value): value is number => value !== null);
-
   return {
     consistency,
     averages,
-    bestSingleMs: finished.length === 0 ? null : Math.min(...finished),
-    crossInsight: analyseCrossDifficulty(solves),
+    // The best single is the fastest counting solve, which the consistency summary has
+    // already found.
+    bestSingleMs: consistency.bestMs,
+    crossInsight: analyseCrossDifficulty(solves.slice(-CROSS_ANALYSIS_WINDOW)),
   };
 }

@@ -15,7 +15,12 @@ export interface TestContext {
 
 export interface CreateTestContextOptions {
   /** Lower these to assert that the rate limiter actually fires. */
-  readonly rateLimit?: { readonly max?: number; readonly credentialMax?: number };
+  readonly rateLimit?: {
+    readonly max?: number;
+    readonly credentialMax?: number;
+    readonly solveMax?: number;
+    readonly solveBatchMax?: number;
+  };
   /** A directory of built client files, for the tests that cover serving them. */
   readonly webRoot?: string;
   /** Run as production would, for the headers that only appear there. */
@@ -56,6 +61,8 @@ export async function createTestContext(
     rateLimit: {
       max: options.rateLimit?.max ?? 100_000,
       credentialMax: options.rateLimit?.credentialMax ?? 100_000,
+      solveMax: options.rateLimit?.solveMax ?? 100_000,
+      solveBatchMax: options.rateLimit?.solveBatchMax ?? 100_000,
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
     ...(options.google === undefined ? {} : { google: options.google }),

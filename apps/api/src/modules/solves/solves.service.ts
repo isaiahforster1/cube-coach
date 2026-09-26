@@ -8,21 +8,25 @@ export function createSolvesService(
   solves: SolvesRepository,
   practiceSessions: PracticeSessionsRepository,
 ) {
+  /**
+   * Check the practice session belongs to this user before writing anything.
+   *
+   * Without it, anyone could post solves into someone else's session by guessing an id.
+   * This is the most common shape of authorisation bug: authentication proves who you
+   * are, and is then mistaken for permission to touch a particular row.
+   */
+  async function requireOwnPracticeSession(userId: string, practiceSessionId: string) {
+    const session = await practiceSessions.findForUser(practiceSessionId, userId);
+    if (session === null) {
+      // Deliberately "not found" rather than "forbidden". Saying "forbidden" would confirm
+      // that the id exists and belongs to someone, which is itself a leak.
+      throw new ApiError(404, 'PRACTICE_SESSION_NOT_FOUND', 'No such practice session');
+    }
+  }
+
   return {
     async create(userId: string, input: CreateSolveRequest) {
-      /**
-       * Check the practice session belongs to this user before writing anything.
-       *
-       * Without it, anyone could post solves into someone else's session by guessing an
-       * id. This is the most common shape of authorisation bug: authentication proves
-       * who you are, and is then mistaken for permission to touch a particular row.
-       */
-      const session = await practiceSessions.findForUser(input.practiceSessionId, userId);
-      if (session === null) {
-        // Deliberately "not found" rather than "forbidden". Saying "forbidden" would
-        // confirm that the id exists and belongs to someone, which is itself a leak.
-        throw new ApiError(404, 'PRACTICE_SESSION_NOT_FOUND', 'No such practice session');
-      }
+      await requireOwnPracticeSession(userId, input.practiceSessionId);
 
       const solve = await solves.upsert({
         id: input.id,
@@ -36,6 +40,26 @@ export function createSolvesService(
       });
 
       return toSolveResponse(solve);
+    },
+
+    /**
+     * Create several solves, one at a time, through the same path as a single create.
+     *
+     * Every practice session is checked before anything is written, so a batch naming
+     * one the caller does not own is refused whole rather than half-applied. A failure
+     * part way through for any other reason is harmless: each create is idempotent, and
+     * the client sends the same batch again.
+     */
+    async createMany(userId: string, inputs: readonly CreateSolveRequest[]) {
+      for (const practiceSessionId of new Set(inputs.map((input) => input.practiceSessionId))) {
+        await requireOwnPracticeSession(userId, practiceSessionId);
+      }
+
+      const created = [];
+      for (const input of inputs) {
+        created.push(await this.create(userId, input));
+      }
+      return created;
     },
 
     async update(userId: string, id: string, input: UpdateSolveRequest) {

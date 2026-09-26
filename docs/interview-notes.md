@@ -2044,3 +2044,53 @@ Google account for that exact address, so they already know the address is their
 
 > "Subject is identity, email is contact information. Email can find an account that has no
 > Google identity yet. It can never replace one."
+
+### How could someone take down the statistics endpoint?
+
+By saving a lot of solves. Statistics are computed over everything stored, and two things
+grew badly with that:
+
+- `Math.min(...times)`. A spread passes every element as a separate function argument,
+  and arguments live on the call stack. Somewhere past 150,000 solves the stack overflows
+  and the request fails with "Maximum call stack size exceeded". A loop needs one variable
+  whatever the size.
+- The cross analysis runs the cube engine on every scramble, about 50 µs each at the
+  longest scramble the API accepts. At 50,000 solves that is 2.6 seconds with the event
+  loop blocked, which means every other user's request waits too. Node runs your code on
+  one thread, so one slow request is everyone's slow request.
+
+Measuring first mattered. The averages looked like the obvious suspect, but they took 84 ms
+at 50,000. Nearly all the cost was the cross analysis.
+
+> "The size of a user's history is something the user controls. Anything whose cost grows
+> with it needs a bound, or the user controls your latency too."
+
+### Why limit the cross analysis to the last thousand solves?
+
+It is a product decision as much as a performance one. The insight answers "do you
+_currently_ give up planning the cross when it's hard?", which is a habit, and habits
+change. Solves from two years ago would dilute exactly the improvement the tool is meant to
+notice. A thousand is far above the minimum evidence the analysis needs, and costs about
+50 ms at worst.
+
+It lives in the shared `buildStatsSummary`, so a guest's browser and the server still
+compute identical numbers.
+
+### Why a batch endpoint instead of just a looser rate limit?
+
+The per-account limit on `POST /solves` is 60 a minute. A person cannot get near that: the
+world record is about three seconds, and real practice includes scrambling.
+
+Guest migration was the problem. It uploaded a stored history one solve at a time, and a
+guest can hold thousands. Loosening the limit enough for that would make it meaningless for
+the human case. So the two workloads get separate endpoints with separate budgets:
+`POST /solves/batch` takes up to 100 solves and allows 10 batches a minute. A typical guest
+now migrates in one request instead of hundreds.
+
+Both limits are keyed on the **account**, not the IP. An attacker can use as many IPs as
+they like, but each request has to be signed in as someone. That meant running the limiter
+as a `preHandler` after `requireAuth` instead of on request arrival, because the user is
+not known yet at that point.
+
+> "Don't loosen a limit meant for people to make room for a machine. Give the machine its
+> own endpoint and its own budget."

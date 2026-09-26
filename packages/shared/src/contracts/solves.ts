@@ -53,6 +53,20 @@ export const createSolveRequestSchema = z.object({
   comment: z.string().max(500).nullable().default(null),
 });
 
+/** The most solves one batch may carry. See `createSolvesBatchRequestSchema`. */
+export const MAX_SOLVES_PER_BATCH = 100;
+
+/**
+ * Many solves at once, for moving a guest's history onto a new account.
+ *
+ * A separate endpoint rather than a looser limit on the single one. A person at a timer
+ * saves a solve every few seconds at the very fastest, and that endpoint is limited to
+ * match; an upload of a stored history is a different workload and gets its own budget.
+ */
+export const createSolvesBatchRequestSchema = z.object({
+  solves: z.array(createSolveRequestSchema).min(1).max(MAX_SOLVES_PER_BATCH),
+});
+
 /**
  * Only the fields a solve can be corrected with after the fact.
  *
@@ -80,5 +94,6 @@ export type PracticeSession = z.infer<typeof practiceSessionSchema>;
 export type CreatePracticeSessionRequest = z.infer<typeof createPracticeSessionRequestSchema>;
 export type Solve = z.infer<typeof solveSchema>;
 export type CreateSolveRequest = z.infer<typeof createSolveRequestSchema>;
+export type CreateSolvesBatchRequest = z.infer<typeof createSolvesBatchRequestSchema>;
 export type UpdateSolveRequest = z.infer<typeof updateSolveRequestSchema>;
 export type ListSolvesQuery = z.infer<typeof listSolvesQuerySchema>;

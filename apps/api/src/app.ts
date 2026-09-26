@@ -44,6 +44,8 @@ export interface BuildAppOptions {
   readonly rateLimit?: {
     readonly max?: number;
     readonly credentialMax?: number;
+    readonly solveMax?: number;
+    readonly solveBatchMax?: number;
   };
   /**
    * Where the built web client lives, when this process is serving it too.
@@ -168,7 +170,10 @@ export async function buildApp({
       registerAuthProviderRoutes(instance, google !== null);
       if (google !== null) registerGoogleRoutes(instance, authService, google);
       registerPracticeSessionRoutes(instance, practiceSessionsService);
-      registerSolveRoutes(instance, solvesService);
+      registerSolveRoutes(instance, solvesService, {
+        solveMax: limits?.solveMax ?? 60,
+        solveBatchMax: limits?.solveBatchMax ?? 10,
+      });
       registerStatsRoutes(instance, statsService);
     },
     { prefix: '/api/v1' },

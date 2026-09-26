@@ -3,6 +3,7 @@ export { summariseConsistency } from './consistency.js';
 export {
   AVERAGE_SIZES,
   buildStatsSummary,
+  CROSS_ANALYSIS_WINDOW,
   type AveragePair,
   type AverageSize,
   type StatsSummary,

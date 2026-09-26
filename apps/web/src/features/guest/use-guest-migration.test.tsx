@@ -14,9 +14,15 @@ function wrapper({ children }: { children: ReactNode }): ReactElement {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-/** A signed-in API, recording every solve posted to it. */
+interface PostedSolve {
+  practiceSessionId: string;
+  id: string;
+}
+
+/** A signed-in API, recording every solve posted to it and every request that carried them. */
 function mockSignedIn({ failUploads = false } = {}) {
-  const posted: { practiceSessionId: string; id: string }[] = [];
+  const posted: PostedSolve[] = [];
+  const requests: string[] = [];
 
   vi.stubGlobal(
     'fetch',
@@ -44,6 +50,7 @@ function mockSignedIn({ failUploads = false } = {}) {
       }
 
       if (url.includes('/solves') && options?.method === 'POST') {
+        requests.push(url);
         if (failUploads) {
           return Promise.resolve({
             ok: false,
@@ -51,12 +58,12 @@ function mockSignedIn({ failUploads = false } = {}) {
             json: () => Promise.resolve({ error: { code: 'INTERNAL_ERROR' } }),
           });
         }
-        const body = JSON.parse(String(options.body)) as { practiceSessionId: string; id: string };
-        posted.push(body);
+        const body = JSON.parse(String(options.body)) as { solves: PostedSolve[] };
+        posted.push(...body.solves);
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ solve: body }),
+          json: () => Promise.resolve({ solves: body.solves }),
         });
       }
 
@@ -64,19 +71,19 @@ function mockSignedIn({ failUploads = false } = {}) {
     }),
   );
 
-  return posted;
+  return Object.assign(posted, { requests });
 }
 
 async function seedGuestSolves(count: number) {
   const store = createGuestStore();
   for (let index = 0; index < count; index += 1) {
     await store.create({
-      id: `00000000-0000-4000-8000-00000000000${index}`,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
       practiceSessionId: GUEST_PRACTICE_SESSION_ID,
       scramble: "R U R'",
       durationMs: 10_000 + index,
       penalty: 'none',
-      solvedAt: `2026-09-18T12:00:0${index}.000Z`,
+      solvedAt: new Date(Date.UTC(2026, 8, 18, 12) + index * 1000).toISOString(),
       comment: null,
     });
   }
@@ -113,6 +120,22 @@ describe('guest migration', () => {
     await waitFor(() => expect(result.current.status).toBe('done'));
     expect(posted).toHaveLength(3);
     expect(result.current.migratedCount).toBe(3);
+  });
+
+  /**
+   * One request per solve would run into the per-account limit on single solves, which is
+   * set for a person at a timer. A stored history goes through the batch endpoint instead.
+   */
+  it('uploads in batches of at most a hundred', async () => {
+    const posted = mockSignedIn();
+    await seedGuestSolves(250);
+
+    const { result } = renderHook(() => useGuestMigration(), { wrapper });
+
+    await waitFor(() => expect(result.current.status).toBe('done'));
+    expect(posted).toHaveLength(250);
+    expect(posted.requests).toHaveLength(3);
+    expect(posted.requests.every((url) => url.endsWith('/solves/batch'))).toBe(true);
   });
 
   /** The guest placeholder session does not exist server-side, so each solve is re-pointed. */
