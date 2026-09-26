@@ -27,6 +27,8 @@ export interface CreateTestContextOptions {
   readonly production?: boolean;
   /** A fake Google, which also switches the Google routes on. */
   readonly google?: GoogleOAuth;
+  /** Environment overrides; `undefined` removes a variable the local .env would set. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 /**
@@ -46,6 +48,7 @@ export async function createTestContext(
 
   const config = loadConfig({
     ...process.env,
+    ...options.env,
     NODE_ENV: options.production === true ? 'production' : 'test',
     DATABASE_URL: databaseUrl,
     // Tests should not print application logs unless something is being debugged.

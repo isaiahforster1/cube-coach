@@ -28,12 +28,23 @@ request.
 | `DATABASE_URL`         | yes      | The Postgres connection string                                        |
 | `PORT`                 | usually  | Whatever the platform expects; defaults to 3000                       |
 | `HOST`                 | yes      | `0.0.0.0`, or the container is unreachable from outside itself        |
-| `WEB_ORIGIN`           | no       | Only matters if the client is ever served from somewhere else         |
+| `WEB_ORIGIN`           | no       | Leave unset. See below                                                |
 | `WEB_ROOT`             | no       | Defaults to the built client next to the API                          |
 | `LOG_LEVEL`            | no       | `info`                                                                |
 | `GOOGLE_CLIENT_ID`     | no       | From the Google Cloud OAuth client                                    |
 | `GOOGLE_CLIENT_SECRET` | no       | From the same place                                                   |
 | `GOOGLE_REDIRECT_URI`  | no       | `https://<host>/api/v1/auth/google/callback`, character for character |
+
+### Why `WEB_ORIGIN` should stay unset
+
+It names a _different_ origin allowed to call the API with the visitor's cookie. In
+production the API serves the client itself (ADR-0017), so there is no other origin, and
+leaving it unset means no CORS headers are sent at all. The browser's same-origin policy
+then refuses every cross-origin read, which is exactly right.
+
+Setting it grants that origin credentialed access, so only set it if the client really is
+served from somewhere else. Development defaults it to `http://localhost:5173`;
+production has no default, because the development one used to apply there too.
 
 None of these belong in the repository. `.env` is ignored by git and `.env.example` holds
 placeholders only.
@@ -44,7 +55,10 @@ The redirect URI goes in **Authorised redirect URIs**, not Authorised JavaScript
 the code exchange happens on the server, so no browser-side origin is involved. It must
 match `GOOGLE_REDIRECT_URI` exactly: scheme, host, path, no trailing slash.
 
-Keep the `localhost` URI alongside the production one so development keeps working.
+Keep the development URI, `http://localhost:5173/api/v1/auth/google/callback`, alongside
+the production one so development keeps working. It goes through the Vite proxy rather than
+straight to port 3000: the callback redirects relatively, to wherever the browser already
+is, and that has to be the page the user started on.
 
 ## Database migrations
 

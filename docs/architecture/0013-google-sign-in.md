@@ -59,8 +59,9 @@ display name.
 Not automatic, and cannot be: it needs a Google Cloud OAuth client, created by hand.
 
 1. Create an OAuth 2.0 Client ID at <https://console.cloud.google.com/apis/credentials>.
-2. Register `http://localhost:3000/api/v1/auth/google/callback` as an authorised redirect
-   URI, and the production equivalent when there is one.
+2. Register `http://localhost:5173/api/v1/auth/google/callback` as an authorised redirect
+   URI, and the production equivalent when there is one. Development goes through the
+   Vite proxy, because the callback redirects relatively (see ADR-0017).
 3. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI` in
    `apps/api/.env`. They are commented out in `.env.example`.
 

@@ -66,13 +66,24 @@ describe('GET /auth/google/callback', () => {
     expect(response.cookies.some((cookie) => cookie.name === SESSION_COOKIE)).toBe(true);
   });
 
+  /**
+   * Relative, never built from configuration. One origin serves both halves (ADR-0017),
+   * so the browser is already where it needs to be; an absolute URL from config sent
+   * production users to `http://localhost:5173` when the variable was left unset.
+   */
+  it('sends the browser home with a relative redirect', async () => {
+    const response = await signInThroughBrowser(profile());
+
+    expect(response.headers.location).toBe('/');
+  });
+
   it('sends a recycled address back to the login page with a specific reason', async () => {
     await signInThroughBrowser(profile({ sub: 'subject-1' }));
 
     const response = await signInThroughBrowser(profile({ sub: 'subject-2' }));
 
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toMatch(/\/login\?error=google_account_mismatch$/u);
+    expect(response.headers.location).toBe('/login?error=google_account_mismatch');
     expect(response.cookies.some((cookie) => cookie.name === SESSION_COOKIE)).toBe(false);
   });
 
@@ -86,6 +97,6 @@ describe('GET /auth/google/callback', () => {
       cookies: { cube_coach_oauth_state: stateCookie?.value ?? '' },
     });
 
-    expect(response.headers.location).toMatch(/\/login\?error=google_state$/u);
+    expect(response.headers.location).toBe('/login?error=google_state');
   });
 });

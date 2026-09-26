@@ -102,19 +102,24 @@ export async function buildApp({
   app.decorate('prisma', prisma);
   app.decorate('config', config);
 
-  // The browser must be told our origin trusts the web client, and `credentials` is
-  // what allows the session cookie to travel at all. Without it the browser silently
-  // drops the cookie on cross-origin requests and every call looks unauthenticated.
+  // CORS only when a separate web origin is configured. With none, no CORS headers are
+  // sent and the browser's same-origin policy refuses every cross-origin read — the
+  // strongest setting, and all that production needs, since it serves one origin.
+  //
+  // When it is registered, `credentials` is what allows the session cookie to travel at
+  // all; without it the browser silently drops the cookie on cross-origin requests.
   //
   // Methods are stated explicitly rather than left to defaults. PATCH and DELETE trigger
   // a preflight OPTIONS, and if the response does not name the method, the real request
   // is blocked — surfacing as a bare network error that explains nothing.
-  await app.register(cors, {
-    origin: config.WEB_ORIGIN,
-    credentials: true,
-    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type'],
-  });
+  if (config.WEB_ORIGIN !== undefined) {
+    await app.register(cors, {
+      origin: config.WEB_ORIGIN,
+      credentials: true,
+      methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type'],
+    });
+  }
 
   await app.register(cookie);
   await app.register(rateLimit, {

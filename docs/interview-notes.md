@@ -2094,3 +2094,36 @@ not known yet at that point.
 
 > "Don't loosen a limit meant for people to make room for a machine. Give the machine its
 > own endpoint and its own budget."
+
+### Google sign-in in production sent people to localhost. How?
+
+A development default leaked into production. `WEB_ORIGIN` defaulted to
+`http://localhost:5173`, Railway never set it, and the Google callback built its redirect
+from it. A successful sign-in set the session cookie and then sent the browser to a
+machine that wasn't there. The same value went into the CORS headers, so production told
+browsers that `localhost:5173` could make credentialed requests.
+
+Two fixes, for two reasons:
+
+- **The redirects are relative** (`/`, `/login?error=…`). One origin serves both halves
+  (ADR-0017), so the browser is already in the right place. A relative redirect cannot
+  point anywhere else, whatever the configuration says.
+- **Production has no default, and no CORS unless it is set.** Same-origin requests never
+  involve CORS. With no CORS headers at all, the browser refuses every cross-origin read,
+  which is the strongest setting there is. Making the variable _required_ was the other
+  option, but that means configuring something production never uses, and deploying this
+  change would have crashed on startup until someone set it.
+
+> "A default is a production value you didn't choose. Development defaults should only
+> apply in development."
+
+### Why is allowing an extra origin in CORS a security problem, not just untidy?
+
+`Access-Control-Allow-Origin: X` with `Allow-Credentials: true` means "a page on X may
+send requests carrying this user's cookie _and read the responses_". Anything able to serve
+a page on `localhost:5173` on a visitor's machine, such as a dev server or a local process
+bound to that port, could read their CubeCoach data. CORS is an exception to the same-origin
+policy, and every origin on the list is a hole in it.
+
+> "CORS only ever loosens the browser's default protection. The safest CORS configuration
+> is none at all."

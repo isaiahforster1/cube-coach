@@ -51,7 +51,7 @@ export function registerGoogleRoutes(
     void reply.clearCookie(OAUTH_STATE_COOKIE, { path: '/' });
 
     if (!parsed.success || expected === undefined || parsed.data.state !== expected) {
-      return reply.redirect(`${app.config.WEB_ORIGIN}/login?error=google_state`);
+      return reply.redirect('/login?error=google_state');
     }
 
     try {
@@ -62,12 +62,16 @@ export function registerGoogleRoutes(
       );
 
       setSessionCookie(reply, token, isProduction);
-      return reply.redirect(app.config.WEB_ORIGIN);
+      // Relative, so the browser stays on the origin it is already on. That is the one
+      // origin serving both halves (ADR-0017), and in development it is the Vite proxy.
+      // Building this from configuration is how production users were once sent to
+      // localhost.
+      return reply.redirect('/');
     } catch (error) {
       request.log.error({ err: error }, 'Google sign-in failed');
       // Back to the login page with a marker rather than an API error page: the browser
       // is mid-navigation here, and a JSON body would be shown to the user raw.
-      return reply.redirect(`${app.config.WEB_ORIGIN}/login?error=${callbackErrorMarker(error)}`);
+      return reply.redirect(`/login?error=${callbackErrorMarker(error)}`);
     }
   });
 }

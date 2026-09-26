@@ -33,6 +33,20 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...valid, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/u);
   });
 
+  /**
+   * The development default must not leak into production. It did: production ran with
+   * `http://localhost:5173` as its web origin, sending Google sign-ins there and telling
+   * browsers that page could make credentialed requests.
+   */
+  it('has no web origin in production unless one is set', () => {
+    expect(loadConfig({ ...valid, NODE_ENV: 'production' }).WEB_ORIGIN).toBeUndefined();
+    expect(loadConfig(valid).WEB_ORIGIN).toBe('http://localhost:5173');
+  });
+
+  it('rejects a web origin that is not a URL', () => {
+    expect(() => loadConfig({ ...valid, WEB_ORIGIN: 'localhost' })).toThrow(/WEB_ORIGIN/u);
+  });
+
   it('rejects an unknown log level', () => {
     expect(() => loadConfig({ ...valid, LOG_LEVEL: 'chatty' })).toThrow(/LOG_LEVEL/u);
   });

@@ -82,6 +82,56 @@ describe('security headers in production', () => {
   });
 });
 
+/**
+ * One origin in production (ADR-0017), so no cross-origin access is needed there at all,
+ * and none is granted. An allowed origin with credentials lets that origin read responses
+ * made with the visitor's cookie.
+ */
+describe('CORS in production', () => {
+  let context: TestContext;
+
+  beforeAll(async () => {
+    context = await createTestContext({ production: true, env: { WEB_ORIGIN: undefined } });
+  });
+
+  afterAll(async () => {
+    await context.close();
+  });
+
+  it('grants no origin cross-origin access', async () => {
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://localhost:5173' },
+    });
+
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+  });
+});
+
+describe('CORS in development', () => {
+  let context: TestContext;
+
+  beforeAll(async () => {
+    context = await createTestContext({ env: { WEB_ORIGIN: undefined } });
+  });
+
+  afterAll(async () => {
+    await context.close();
+  });
+
+  it('allows the Vite dev server by default', async () => {
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://localhost:5173' },
+    });
+
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+  });
+});
+
 describe('request limits', () => {
   let context: TestContext;
 
