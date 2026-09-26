@@ -20,6 +20,9 @@ export function createSolvesRepository(prisma: PrismaClient) {
      * `upsert` with an empty update is what makes retrying safe: a second request with
      * the same client-generated id is a no-op that returns the original row, rather than
      * a duplicate or a unique-constraint error the client would have to interpret.
+     *
+     * The row returned may belong to a different user, because the lookup is by id alone.
+     * The service checks ownership before anything is returned to the caller.
      */
     upsert(data: {
       id: string;

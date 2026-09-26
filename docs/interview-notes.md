@@ -2127,3 +2127,24 @@ policy, and every origin on the list is a hole in it.
 
 > "CORS only ever loosens the browser's default protection. The safest CORS configuration
 > is none at all."
+
+### How did an idempotent create leak another user's solve?
+
+Creating a solve is an upsert on the client-generated id with an empty update: "insert
+this, or if the id already exists, give me the stored row". That makes a retry after a
+dropped connection harmless.
+
+The lookup was by **id alone**. If user B sent a request with user A's solve id, nothing
+was written, and the stored row was returned to B with a 200: A's time, scramble, date and
+private comment. Every other solve endpoint scoped by `userId`; this one didn't, because
+an upsert doesn't look like a read.
+
+The fix checks the returned row's owner. If it isn't the caller, the request fails with
+`409 SOLVE_ID_CONFLICT` and the row is never serialised. The owner's own retries still
+behave exactly as before.
+
+Is the 409 itself a leak? It confirms that an id exists. But ids are random UUIDs, so B
+could only send one they had already obtained, and nothing about the solve is revealed.
+
+> "An idempotency key identifies a request, not a permission. Every lookup by id also
+> checks who is asking, including the ones hidden inside a write."

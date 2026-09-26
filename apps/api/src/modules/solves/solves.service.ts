@@ -39,6 +39,14 @@ export function createSolvesService(
         comment: input.comment,
       });
 
+      // The upsert finds an existing row by id alone, so a repeated id can bring back a
+      // row that someone else owns. A retry by the owner is the case idempotency exists
+      // for; anyone else is refused without being shown the row. Solve ids are random
+      // UUIDs, so this should only ever happen to someone who obtained another user's.
+      if (solve.userId !== userId) {
+        throw new ApiError(409, 'SOLVE_ID_CONFLICT', 'That solve id is already in use');
+      }
+
       return toSolveResponse(solve);
     },
 
