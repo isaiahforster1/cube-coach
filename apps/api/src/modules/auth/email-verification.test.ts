@@ -344,3 +344,29 @@ describe('POST /auth/resend-verification', () => {
     }
   });
 });
+
+/** The client offers verification only when the server can actually send the email. */
+describe('GET /auth/providers', () => {
+  it('reports email verification when email can be sent', async () => {
+    const response = await context.app.inject({ method: 'GET', url: '/api/v1/auth/providers' });
+
+    expect(response.json()).toMatchObject({ emailVerification: true });
+  });
+
+  it('reports none in production without an email provider', async () => {
+    const production = await createTestContext({
+      production: true,
+      env: { RESEND_API_KEY: undefined, EMAIL_FROM: undefined, APP_URL: undefined },
+    });
+
+    try {
+      const response = await production.app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/providers',
+      });
+      expect(response.json()).toMatchObject({ emailVerification: false });
+    } finally {
+      await production.close();
+    }
+  });
+});

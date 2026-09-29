@@ -253,7 +253,10 @@ export async function buildApp({
           resendMax: limits?.resendMax ?? 3,
         });
       }
-      registerAuthProviderRoutes(instance, google !== null);
+      registerAuthProviderRoutes(instance, {
+        google: google !== null,
+        emailVerification: emailVerification !== null,
+      });
       if (google !== null) registerGoogleRoutes(instance, authService, google);
       registerPracticeSessionRoutes(instance, practiceSessionsService);
       registerSolveRoutes(instance, solvesService, {

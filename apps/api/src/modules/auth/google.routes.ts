@@ -99,7 +99,10 @@ function callbackErrorMarker(error: unknown): string {
   return 'google_failed';
 }
 
-/** Lets the client know which sign-in options actually exist. */
-export function registerAuthProviderRoutes(app: FastifyInstance, googleEnabled: boolean): void {
-  app.get('/auth/providers', () => ({ password: true, google: googleEnabled }));
+/** Lets the client know which sign-in options, and whether email verification, exist. */
+export function registerAuthProviderRoutes(
+  app: FastifyInstance,
+  enabled: { readonly google: boolean; readonly emailVerification: boolean },
+): void {
+  app.get('/auth/providers', () => ({ password: true, ...enabled }));
 }
