@@ -2326,3 +2326,132 @@ If an answer doesn't hold up, that is the part to re-read.
 7. **Follow-up an interviewer might add:** the fix discards credentials. What does a
    genuine user who registered with a password experience afterwards, and how would you
    explain that trade-off to a product owner?
+
+## Email verification
+
+Registration now proves the address, which lets a verified password survive a Google link
+(ADR-0019). Every test was written first and seen to fail.
+
+### Why does verifying need a signed-in session as well as the link?
+
+Because the link only proves the inbox. The thing that has to be proved is that **the
+person who chose the password** owns the address.
+
+With a link alone, pre-hijacking survives verification. The attacker registers
+`victim@gmail.com`; we email the victim "confirm your address"; the victim, reasonably,
+clicks it. Now the attacker's password is "verified", and the new rule keeps it when the
+victim later signs in with Google. Requiring the session means whoever clicks has to know
+the password too. The victim doesn't, so nothing is verified.
+
+This is the most common way email verification is built, and the gap is easy to miss
+because the email _looks_ like proof.
+
+> "The link proves the inbox, the session proves the password. Verification means proving
+> they belong to the same person, so you need both."
+
+### Why is the token in the URL fragment, and why does the page POST it?
+
+The **fragment** (`#token=…`) is never sent to a server by the browser. A query string
+is, so it lands in access logs, proxy logs, analytics and the `Referer` header of anything
+the page loads. The server's log serializer already strips query strings, but the fragment
+is never there to strip.
+
+The **POST** is about mail scanners. Corporate and webmail security tools open links in
+incoming mail to check them. If a GET verified the address, the scanner would use up the
+single-use token before the person clicked, and they would see "link expired" on their
+first try. A page that has to run JavaScript and then POST is something a scanner won't do.
+
+> "Fragments stay in the browser, and GETs get followed by robots. So the token rides in
+> the fragment and only a POST spends it."
+
+### How is a single-use token enforced when two requests arrive at once?
+
+By making "check it's unused" and "mark it used" the same statement:
+`UPDATE ... SET used_at = now() WHERE token_hash = $1 AND user_id = $2 AND used_at IS NULL
+AND expires_at > now()`, then counting the rows updated.
+
+Reading first and writing second would race: both requests read "unused" and both
+succeed. With one conditional update, Postgres locks the row for the first, and the second
+re-checks the `WHERE` after the first commits, finds `used_at` set, and updates nothing.
+The same pattern is behind "compare-and-swap" and optimistic concurrency.
+
+> "Check-then-act is a race. Put the check in the WHERE of the act."
+
+### Why is the token hashed, but with SHA-256 rather than Argon2?
+
+Hashed for the same reason as passwords and sessions: a leaked database dump should hold
+nothing usable. SHA-256 rather than a slow hash because the token has 256 random bits.
+Slow hashing exists to make guessing low-entropy passwords expensive, and there is nothing
+to guess here.
+
+### Why leave the display name out of the email?
+
+The person registering may be an attacker using someone else's address, and the email goes
+to that someone else, from our domain. Anything the registrant typed becomes content we
+send on their behalf. A display name of "Claim your prize at evil.example" turns the
+verification email into phishing with our name on it. Fixed text plus the link gives an
+attacker nothing to write.
+
+> "If the recipient didn't ask for the email, nothing the sender typed should be in it."
+
+### Why is the link's address configuration, not the request's Host header?
+
+`Host` is chosen by whoever sends the request. If links were built from it, an attacker
+could trigger an email to a user with `Host: evil.example` and the user would receive a
+genuine email from us linking to the attacker's site. This is **host header poisoning**,
+and password-reset emails are the classic victim. So `APP_URL` is set per environment,
+and production refuses to start with email configured but no `APP_URL`.
+
+### How do the endpoints avoid revealing which addresses are registered?
+
+Neither takes an address. Resend sends to the signed-in account's own address, and verify
+takes only a token. There is nothing to probe with. Every bad token also gets the same
+response, so the endpoint can't be used to tell "never existed" from "used" from "someone
+else's".
+
+### Why does a failed send not fail registration, but does fail resend?
+
+Registration's job is to create the account, which works without verification. Refusing
+new users because the email provider is down would turn an optional step into an outage.
+Resend's _only_ job is sending the email, so if that fails, the honest answer is an error.
+
+### Why an interface for one provider?
+
+So that tests never send real mail or need a key, and so the provider is a one-file
+change. `EmailSender` has one method. Resend, a development logger and a test fake all
+implement it, and nothing that sends mail knows which one it has. It is the same reasoning
+as the injectable `fetch` in the Google exchange: isolate the part you can't control.
+
+### What does a verified password change when Google links the account?
+
+| Account              | Password | Sessions    |
+| -------------------- | -------- | ----------- |
+| Email verified       | kept     | kept        |
+| Email never verified | cleared  | all revoked |
+
+The decision reads `email_verified_at` just before linking. A value read a moment ago can
+be stale, but the only change possible is null becoming verified, and missing that
+discards a password that could have been kept. When a race can only push you towards the
+safe side, you don't need a lock.
+
+### Teach-back: email verification, to answer in your own words
+
+Written questions to answer before re-reading the entries above.
+
+1. **Walk through pre-hijacking against a link-only design.** At which step does the
+   attacker's password become "verified", and which step does the session requirement
+   break?
+2. **What exactly does the verified flag claim?** Name the two facts it stands for, and the
+   request that establishes both.
+3. **Why a fragment and not a query string?** List three places a query string would end up
+   that a fragment never reaches.
+4. **A user says their link was "already used" the first time they clicked it.** What is the
+   likely cause, and how does this design prevent it?
+5. **Two tabs submit the same token at the same moment.** Describe what Postgres does, step
+   by step, and why only one succeeds.
+6. **Why are unverified accounts allowed to do everything?** What would blocking them cost,
+   and which risk does allowing them leave open? (Hint: address squatting.)
+7. **An interviewer asks:** "Your verification email includes a greeting with the user's
+   name. Is that a problem?" How do you answer?
+8. **An interviewer asks:** "How would you add password reset on top of this?" Which parts
+   can you reuse, and what must reset do that verification doesn't? (Hint: sessions.)

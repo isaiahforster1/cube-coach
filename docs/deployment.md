@@ -22,19 +22,22 @@ Set on the service. Everything is validated at startup, so a missing or malforme
 fails immediately with the name of the variable rather than surfacing on some later
 request.
 
-| Variable                 | Required | Value                                                                 |
-| ------------------------ | -------- | --------------------------------------------------------------------- |
-| `NODE_ENV`               | yes      | `production` — switches on secure cookies, HSTS and JSON logs         |
-| `DATABASE_URL`           | yes      | The Postgres connection string the application uses                   |
-| `MIGRATION_DATABASE_URL` | no       | A more privileged connection for migrations only. See below           |
-| `PORT`                   | usually  | Whatever the platform expects; defaults to 3000                       |
-| `HOST`                   | yes      | `0.0.0.0`, or the container is unreachable from outside itself        |
-| `WEB_ORIGIN`             | no       | Leave unset. See below                                                |
-| `WEB_ROOT`               | no       | Defaults to the built client next to the API                          |
-| `LOG_LEVEL`              | no       | `info`                                                                |
-| `GOOGLE_CLIENT_ID`       | no       | From the Google Cloud OAuth client                                    |
-| `GOOGLE_CLIENT_SECRET`   | no       | From the same place                                                   |
-| `GOOGLE_REDIRECT_URI`    | no       | `https://<host>/api/v1/auth/google/callback`, character for character |
+| Variable                 | Required | Value                                                                   |
+| ------------------------ | -------- | ----------------------------------------------------------------------- |
+| `NODE_ENV`               | yes      | `production` — switches on secure cookies, HSTS and JSON logs           |
+| `DATABASE_URL`           | yes      | The Postgres connection string the application uses                     |
+| `MIGRATION_DATABASE_URL` | no       | A more privileged connection for migrations only. See below             |
+| `PORT`                   | usually  | Whatever the platform expects; defaults to 3000                         |
+| `HOST`                   | yes      | `0.0.0.0`, or the container is unreachable from outside itself          |
+| `WEB_ORIGIN`             | no       | Leave unset. See below                                                  |
+| `WEB_ROOT`               | no       | Defaults to the built client next to the API                            |
+| `LOG_LEVEL`              | no       | `info`                                                                  |
+| `GOOGLE_CLIENT_ID`       | no       | From the Google Cloud OAuth client                                      |
+| `GOOGLE_CLIENT_SECRET`   | no       | From the same place                                                     |
+| `GOOGLE_REDIRECT_URI`    | no       | `https://<host>/api/v1/auth/google/callback`, character for character   |
+| `RESEND_API_KEY`         | no       | A Resend API key with sending access only. See below                    |
+| `EMAIL_FROM`             | with key | `CubeCoach <verify@mail.<your-domain>>`, on the domain set up in Resend |
+| `APP_URL`                | with key | `https://<host>`, the public address links in emails point to           |
 
 ### Why `WEB_ORIGIN` should stay unset
 
@@ -60,6 +63,42 @@ Keep the development URI, `http://localhost:5173/api/v1/auth/google/callback`, a
 the production one so development keeps working. It goes through the Vite proxy rather than
 straight to port 3000: the callback redirects relatively, to wherever the browser already
 is, and that has to be the page the user started on.
+
+## Email verification (Resend)
+
+Optional. Without it, production sends no email, offers no "confirm your email" button,
+and every password stays unproved, so a Google link clears it (ADR-0019). With it:
+
+1. **Create a Resend account** at <https://resend.com>. Check the current free-tier limits
+   on its pricing page.
+2. **Add a sending domain.** Use a subdomain such as `mail.<your-domain>` rather than the
+   root, so the records below cannot clash with any mail the root domain already handles,
+   and so a reputation problem stays contained to the subdomain.
+3. **Add the DNS records Resend shows for that domain**, at your DNS provider, exactly as
+   given. Expect:
+   - a **TXT** record `resend._domainkey.mail` holding the DKIM public key, which lets
+     receivers check the mail really came from Resend on your behalf;
+   - an **MX** and a **TXT** (SPF, `v=spf1 include:… ~all`) record on the bounce subdomain
+     Resend names (usually `send.mail`), which handle bounces and tell receivers Resend
+     may send for you;
+   - optionally a **TXT** record `_dmarc.mail` such as `v=DMARC1; p=none;`, which says what
+     receivers should do when those checks fail. `p=none` only reports; tighten it once
+     mail is flowing.
+4. **Wait for Resend to show the domain as verified.** DNS can take minutes to hours.
+5. **Create an API key** with **sending access only**, restricted to that domain. Full
+   access would let anyone holding the key manage the account.
+6. **Set the variables on the Railway service:** `RESEND_API_KEY`, `EMAIL_FROM` (for
+   example `CubeCoach <verify@mail.<your-domain>>`) and `APP_URL` (the public
+   `https://` address, no trailing slash). Startup refuses a key without `EMAIL_FROM`, and
+   in production without `APP_URL`.
+7. **Redeploy and check** with step 8 of the checklist below.
+
+`APP_URL` is set rather than taken from requests because the `Host` header is chosen by the
+client. Links built from it would let anyone make the application email its users a link
+to a site of their choosing.
+
+In development none of this is needed: without a key, the API prints each email, link
+included, to its terminal.
 
 ## Database migrations
 
@@ -184,3 +223,5 @@ before calling the release complete.
 5. `GET /health/ready` returns `ready`.
 6. Open the site: a scramble appears, the timer runs, a solve saves.
 7. If Google sign-in is configured, `GET /api/v1/auth/providers` reports `"google": true`.
+8. If Resend is configured, it reports `"emailVerification": true`, and registering a
+   throwaway account delivers a link that confirms it.

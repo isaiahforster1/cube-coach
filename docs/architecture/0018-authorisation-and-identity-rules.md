@@ -7,6 +7,10 @@ Accepted — 2026-09-26
 Amends [ADR-0013](0013-google-sign-in.md): linking by email is no longer justified by
 Google's verification check alone.
 
+Amended by [ADR-0019](0019-email-verification.md) — 2026-09-29. Registration now verifies
+email, so rule 3 applies in full: an account whose email was verified keeps its password
+and sessions when Google links it, and an unverified one is treated as below.
+
 ## Context
 
 A security review found ten problems. Most were small, and all are fixed, but they were not
