@@ -76,6 +76,24 @@ export function createAuthRepository(prisma: PrismaClient) {
       });
     },
 
+    /**
+     * Store a new verification token, deleting any the user already had.
+     *
+     * One outstanding link per user: asking for another makes the old one useless, and
+     * the table cannot grow with how often someone presses "resend".
+     */
+    replaceVerificationToken(data: {
+      userId: string;
+      email: string;
+      tokenHash: string;
+      expiresAt: Date;
+    }) {
+      return prisma.$transaction([
+        prisma.emailVerificationToken.deleteMany({ where: { userId: data.userId } }),
+        prisma.emailVerificationToken.create({ data }),
+      ]);
+    },
+
     createSession(data: {
       userId: string;
       tokenHash: string;

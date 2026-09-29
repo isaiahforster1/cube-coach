@@ -5,9 +5,12 @@ import { buildApp } from '../app.js';
 import { loadConfig } from '../config.js';
 import { createPrismaClient } from '../db.js';
 import type { GoogleOAuth } from '../modules/auth/google.js';
+import { createFakeEmailSender, type FakeEmailSender } from './fake-email-sender.js';
 
 export interface TestContext {
   readonly app: FastifyInstance;
+  /** Every email the application sent, recorded instead of delivered. */
+  readonly emails: FakeEmailSender;
   readonly prisma: PrismaClient;
   /** Empty every table, so each test starts from a known state. */
   reset(): Promise<void>;
@@ -28,6 +31,8 @@ export interface CreateTestContextOptions {
   readonly production?: boolean;
   /** A fake Google, which also switches the Google routes on. */
   readonly google?: GoogleOAuth;
+  /** Replaces the fake that records email, e.g. to make sending fail. */
+  readonly emailSender?: FakeEmailSender;
   /** Capture the application's logs, at info level, for tests about what gets logged. */
   readonly logStream?: Writable;
   /** Environment overrides; `undefined` removes a variable the local .env would set. */
@@ -59,6 +64,7 @@ export async function createTestContext(
       options.logStream === undefined ? (process.env['TEST_LOG_LEVEL'] ?? 'silent') : 'info',
   });
 
+  const emails = options.emailSender ?? createFakeEmailSender();
   const prisma = createPrismaClient(config.DATABASE_URL);
   const app = await buildApp({
     config,
@@ -73,15 +79,20 @@ export async function createTestContext(
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
     ...(options.google === undefined ? {} : { google: options.google }),
+    // Always a fake: no test sends real mail, whatever the local .env configures.
+    emailSender: emails,
     ...(options.logStream === undefined ? {} : { logStream: options.logStream }),
   });
   await app.ready();
 
   return {
+    emails,
     app,
     prisma,
 
     async reset(): Promise<void> {
+      emails.sent.length = 0;
+
       // Discovered rather than hard-coded, so a new table cannot be forgotten here and
       // silently leak rows between tests. The migrations table is left alone.
       const tables = await prisma.$queryRaw<{ tablename: string }[]>`

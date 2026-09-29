@@ -4,10 +4,12 @@ import { currentUser } from '../../plugins/authenticate.js';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from './auth.cookie.js';
 import type { AuthService } from './auth.service.js';
 import { toPublicUser } from './auth.service.js';
+import type { EmailVerificationService } from './email-verification.js';
 
 export function registerAuthRoutes(
   app: FastifyInstance,
   authService: AuthService,
+  emailVerification: EmailVerificationService | null,
   credentialMax: number,
 ): void {
   const isProduction = app.config.NODE_ENV === 'production';
@@ -37,6 +39,17 @@ export function registerAuthRoutes(
       input,
       request.headers['user-agent'] ?? null,
     );
+
+    // A failure to send is logged, not returned. The account works without verification
+    // (ADR-0012), and a provider outage should not turn new users away; they can ask for
+    // the link again.
+    if (emailVerification !== null) {
+      try {
+        await emailVerification.sendLink(user);
+      } catch (error) {
+        request.log.error({ err: error }, 'Could not send the verification email');
+      }
+    }
 
     setSessionCookie(reply, token, isProduction);
     return reply.status(201).send({ user: toPublicUser(user) });

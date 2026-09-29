@@ -8,8 +8,14 @@ import type { Config } from './config.js';
 import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
+import { createEmailVerificationService } from './modules/auth/email-verification.js';
 import { createAuthService } from './modules/auth/auth.service.js';
 import { createGoogleOAuth, type GoogleOAuth } from './modules/auth/google.js';
+import {
+  createLogEmailSender,
+  createResendEmailSender,
+  type EmailSender,
+} from './modules/email/email-sender.js';
 import { registerAuthProviderRoutes, registerGoogleRoutes } from './modules/auth/google.routes.js';
 import { createPracticeSessionsRepository } from './modules/practice-sessions/practice-sessions.repository.js';
 import { registerPracticeSessionRoutes } from './modules/practice-sessions/practice-sessions.routes.js';
@@ -60,6 +66,8 @@ export interface BuildAppOptions {
    * or a network. When given, the Google routes are registered regardless of config.
    */
   readonly google?: GoogleOAuth;
+  /** Stand in for the email provider, so tests can read what would have been sent. */
+  readonly emailSender?: EmailSender;
   /** Where log lines go instead of stdout, so tests can assert on what is logged. */
   readonly logStream?: Writable;
 }
@@ -116,6 +124,7 @@ export async function buildApp({
   rateLimit: limits,
   webRoot,
   google: googleOverride,
+  emailSender: emailSenderOverride,
   logStream,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
@@ -170,7 +179,28 @@ export async function buildApp({
     timeWindow: '1 minute',
   });
 
-  const authService = createAuthService(createAuthRepository(prisma));
+  const authRepository = createAuthRepository(prisma);
+  const authService = createAuthService(authRepository);
+
+  /**
+   * Email verification needs somewhere to send mail and an address to link back to.
+   *
+   * Resend when it is configured; otherwise development logs the email, and production
+   * sends none. Without verification every password stays unproved, which is safe: a
+   * Google link then discards it, exactly as before verification existed (ADR-0019).
+   */
+  const emailSender =
+    emailSenderOverride ??
+    (config.RESEND_API_KEY !== undefined && config.EMAIL_FROM !== undefined
+      ? createResendEmailSender({ apiKey: config.RESEND_API_KEY, from: config.EMAIL_FROM })
+      : isProduction
+        ? null
+        : createLogEmailSender(app.log));
+
+  const emailVerification =
+    emailSender === null || config.APP_URL === undefined
+      ? null
+      : createEmailVerificationService(authRepository, emailSender, config.APP_URL);
 
   /**
    * Google sign-in is only wired up when it is configured.
@@ -213,7 +243,7 @@ export async function buildApp({
   // application is on.
   await app.register(
     async (instance) => {
-      registerAuthRoutes(instance, authService, limits?.credentialMax ?? 10);
+      registerAuthRoutes(instance, authService, emailVerification, limits?.credentialMax ?? 10);
       registerAuthProviderRoutes(instance, google !== null);
       if (google !== null) registerGoogleRoutes(instance, authService, google);
       registerPracticeSessionRoutes(instance, practiceSessionsService);
