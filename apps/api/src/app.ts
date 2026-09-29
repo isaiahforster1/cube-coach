@@ -9,6 +9,7 @@ import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 import { createEmailVerificationService } from './modules/auth/email-verification.js';
+import { registerEmailVerificationRoutes } from './modules/auth/email-verification.routes.js';
 import { createAuthService } from './modules/auth/auth.service.js';
 import { createGoogleOAuth, type GoogleOAuth } from './modules/auth/google.js';
 import {
@@ -53,6 +54,7 @@ export interface BuildAppOptions {
     readonly credentialMax?: number;
     readonly solveMax?: number;
     readonly solveBatchMax?: number;
+    readonly verificationMax?: number;
   };
   /**
    * Where the built web client lives, when this process is serving it too.
@@ -244,6 +246,11 @@ export async function buildApp({
   await app.register(
     async (instance) => {
       registerAuthRoutes(instance, authService, emailVerification, limits?.credentialMax ?? 10);
+      if (emailVerification !== null) {
+        registerEmailVerificationRoutes(instance, emailVerification, {
+          verificationMax: limits?.verificationMax ?? 10,
+        });
+      }
       registerAuthProviderRoutes(instance, google !== null);
       if (google !== null) registerGoogleRoutes(instance, authService, google);
       registerPracticeSessionRoutes(instance, practiceSessionsService);

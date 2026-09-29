@@ -4,9 +4,11 @@ export {
   passwordSchema,
   publicUserSchema,
   registerRequestSchema,
+  verifyEmailRequestSchema,
   type LoginRequest,
   type PublicUser,
   type RegisterRequest,
+  type VerifyEmailRequest,
 } from './auth.js';
 
 export {

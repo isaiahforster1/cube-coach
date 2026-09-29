@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createFakeEmailSender } from '../../test/fake-email-sender.js';
 import { createTestContext, type TestContext } from '../../test/context.js';
+import { SESSION_COOKIE } from './auth.cookie.js';
 
 let context: TestContext;
 
@@ -99,6 +100,151 @@ describe('the verification email sent at registration', () => {
       expect(response.statusCode).toBe(201);
     } finally {
       await broken.close();
+    }
+  });
+});
+
+interface ResponseWithCookies {
+  readonly cookies: readonly { readonly name: string; readonly value: string }[];
+}
+
+function sessionCookie(response: ResponseWithCookies): string {
+  const cookie = response.cookies.find((candidate) => candidate.name === SESSION_COOKIE);
+  if (cookie === undefined) throw new Error('No session cookie was set');
+  return cookie.value;
+}
+
+/** Register and return the session cookie and the token from the emailed link. */
+async function registerAndReadLink(email = CREDENTIALS.email) {
+  const response = await register({ email });
+  return { cookie: sessionCookie(response), token: tokenFromLatestEmail() };
+}
+
+function verify(token: string, cookie: string | undefined, app = context.app) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify-email',
+    payload: { token },
+    ...(cookie === undefined ? {} : { cookies: { [SESSION_COOKIE]: cookie } }),
+  });
+}
+
+async function isVerified(email: string): Promise<boolean> {
+  const user = await context.prisma.user.findUniqueOrThrow({ where: { email } });
+  return user.emailVerifiedAt !== null;
+}
+
+describe('POST /auth/verify-email', () => {
+  it('verifies the address and returns the updated user', async () => {
+    const { cookie, token } = await registerAndReadLink();
+
+    const response = await verify(token, cookie);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.emailVerified).toBe(true);
+    expect(await isVerified(CREDENTIALS.email)).toBe(true);
+  });
+
+  /**
+   * The link proves the inbox; the session proves the password. Together they show the
+   * person who chose the password also receives mail at the address.
+   *
+   * Without the session, pre-hijacking survives verification: an attacker registers the
+   * victim's address, the victim gets a "confirm your email" message and clicks it, and
+   * the attacker's password becomes a verified one that outlives a later Google link.
+   */
+  it('requires the account to be signed in', async () => {
+    const { token } = await registerAndReadLink();
+
+    const response = await verify(token, undefined);
+
+    expect(response.statusCode).toBe(401);
+    expect(await isVerified(CREDENTIALS.email)).toBe(false);
+  });
+
+  it('works once', async () => {
+    const { cookie, token } = await registerAndReadLink();
+
+    expect((await verify(token, cookie)).statusCode).toBe(200);
+    const again = await verify(token, cookie);
+
+    expect(again.statusCode).toBe(400);
+    expect(again.json().error.code).toBe('VERIFICATION_LINK_INVALID');
+  });
+
+  it('refuses an expired link', async () => {
+    const { cookie, token } = await registerAndReadLink();
+    await context.prisma.emailVerificationToken.updateMany({
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const response = await verify(token, cookie);
+
+    expect(response.statusCode).toBe(400);
+    expect(await isVerified(CREDENTIALS.email)).toBe(false);
+  });
+
+  /** Rule 1 of ADR-0018: a token is looked up together with the caller, never alone. */
+  it("refuses another account's link, verifying neither", async () => {
+    const victim = await registerAndReadLink('victim@example.com');
+    const attacker = await registerAndReadLink('attacker@example.com');
+
+    const response = await verify(victim.token, attacker.cookie);
+
+    expect(response.statusCode).toBe(400);
+    expect(await isVerified('victim@example.com')).toBe(false);
+    expect(await isVerified('attacker@example.com')).toBe(false);
+  });
+
+  /** A link proves only the address it was delivered to. */
+  it('refuses a link sent to an address the account no longer has', async () => {
+    const { cookie, token } = await registerAndReadLink();
+    await context.prisma.user.update({
+      where: { email: CREDENTIALS.email },
+      data: { email: 'changed@example.com' },
+    });
+
+    expect((await verify(token, cookie)).statusCode).toBe(400);
+    expect(await isVerified('changed@example.com')).toBe(false);
+  });
+
+  /**
+   * Unknown, used, expired and someone else's all look the same, so the response says
+   * nothing about which tokens exist or whose they are.
+   */
+  it('gives one response for every kind of bad link', async () => {
+    const { cookie, token } = await registerAndReadLink();
+    const unknown = await verify('A'.repeat(43), cookie);
+
+    await verify(token, cookie);
+    const used = await verify(token, cookie);
+
+    expect(used.statusCode).toBe(unknown.statusCode);
+    expect(used.body).toBe(unknown.body);
+  });
+
+  it('rejects a token that is not the right shape before looking it up', async () => {
+    const { cookie } = await registerAndReadLink();
+
+    const response = await verify('not a token', cookie);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('is rate limited per account', async () => {
+    const limited = await createTestContext({ rateLimit: { verificationMax: 2 } });
+
+    try {
+      await limited.reset();
+      const cookie = sessionCookie(await register({}, limited.app));
+      const attempt = () => verify('A'.repeat(43), cookie, limited.app);
+
+      expect((await attempt()).statusCode).toBe(400);
+      expect((await attempt()).statusCode).toBe(400);
+      expect((await attempt()).statusCode).toBe(429);
+    } finally {
+      await limited.close();
     }
   });
 });

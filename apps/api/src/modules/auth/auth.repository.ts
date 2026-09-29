@@ -94,6 +94,35 @@ export function createAuthRepository(prisma: PrismaClient) {
       ]);
     },
 
+    /**
+     * Use up a verification token and mark the account verified, or return null.
+     *
+     * The token must belong to this user, be unused and unexpired, and have been sent to
+     * the address the account has now. All of that is the `where` of one conditional
+     * update, so two requests racing with the same token cannot both succeed: Postgres
+     * applies them one after the other, and the second finds `used_at` already set.
+     */
+    consumeVerificationToken(userId: string, tokenHash: string, now: Date) {
+      return prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+
+        const consumed = await tx.emailVerificationToken.updateMany({
+          where: {
+            tokenHash,
+            userId,
+            email: user.email,
+            usedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { usedAt: now },
+        });
+
+        if (consumed.count === 0) return null;
+
+        return tx.user.update({ where: { id: userId }, data: { emailVerifiedAt: now } });
+      });
+    },
+
     createSession(data: {
       userId: string;
       tokenHash: string;

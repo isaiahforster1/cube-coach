@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
+import type { User } from '@prisma/client';
+import { ApiError } from '../../plugins/error-handler.js';
 import type { EmailMessage, EmailSender } from '../email/email-sender.js';
 import type { AuthRepository } from './auth.repository.js';
 
@@ -82,6 +84,31 @@ export function createEmailVerificationService(
 
       const link = new URL(`/verify-email#token=${token}`, appUrl).toString();
       await sender.send(verificationEmail(user.email, link));
+    },
+
+    /**
+     * Verify the signed-in user's address with a token from their link.
+     *
+     * Every way a token can be wrong gives the same error: unknown, used, expired, sent to
+     * another address or belonging to someone else. Telling them apart would only help
+     * someone probing for valid tokens.
+     */
+    async verify(userId: string, token: string): Promise<User> {
+      const user = await repository.consumeVerificationToken(
+        userId,
+        hashVerificationToken(token),
+        new Date(),
+      );
+
+      if (user === null) {
+        throw new ApiError(
+          400,
+          'VERIFICATION_LINK_INVALID',
+          'This link is invalid or has expired. You can ask for a new one.',
+        );
+      }
+
+      return user;
     },
   };
 }
