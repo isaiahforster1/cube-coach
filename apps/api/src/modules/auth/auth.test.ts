@@ -65,6 +65,20 @@ describe('POST /auth/register', () => {
     expect(response.body).not.toContain(CREDENTIALS.password);
   });
 
+  /**
+   * Registration proves nothing about who owns the address, so a new password account
+   * starts unverified. Anything that treats the address as proved must wait for the link.
+   */
+  it('starts the account with an unverified email', async () => {
+    const response = await register();
+
+    expect(response.json().user.emailVerified).toBe(false);
+    const user = await context.prisma.user.findUniqueOrThrow({
+      where: { email: CREDENTIALS.email },
+    });
+    expect(user.emailVerifiedAt).toBeNull();
+  });
+
   it('sets an httpOnly session cookie', async () => {
     const response = await register();
     const cookie = response.cookies.find((candidate) => candidate.name === SESSION_COOKIE);

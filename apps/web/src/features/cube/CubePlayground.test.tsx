@@ -13,7 +13,7 @@ function mockSession() {
         status: 200,
         json: () =>
           Promise.resolve({
-            user: { id: '1', email: 'a@b', displayName: 'C', createdAt: '' },
+            user: { id: '1', email: 'a@b', displayName: 'C', emailVerified: true, createdAt: '' },
           }),
       }),
     ),

@@ -22,6 +22,7 @@ export function toPublicUser(user: User): PublicUser {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    emailVerified: user.emailVerifiedAt !== null,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -129,6 +130,8 @@ export function createAuthService(repository: AuthRepository) {
         email: profile.email,
         displayName: profile.name,
         googleId: profile.sub,
+        // Google proved the address; there is nothing left for us to check.
+        emailVerifiedAt: new Date(),
       });
 
       return { user, token: await this.startSession(user.id, userAgent) };

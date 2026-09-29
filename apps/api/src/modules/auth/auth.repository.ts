@@ -33,7 +33,11 @@ export function createAuthRepository(prisma: PrismaClient) {
      */
     async linkGoogleAccount(userId: string, googleId: string, now: Date) {
       const [user] = await prisma.$transaction([
-        prisma.user.update({ where: { id: userId }, data: { googleId, passwordHash: null } }),
+        prisma.user.update({
+          where: { id: userId },
+          // Google's verified email is proof of the address, so the account is now verified.
+          data: { googleId, passwordHash: null, emailVerifiedAt: now },
+        }),
         prisma.authSession.updateMany({
           where: { userId, revokedAt: null },
           data: { revokedAt: now },
@@ -43,7 +47,12 @@ export function createAuthRepository(prisma: PrismaClient) {
     },
 
     /** A Google account has no password, so it is created without one. */
-    createGoogleUser(data: { email: string; displayName: string; googleId: string }) {
+    createGoogleUser(data: {
+      email: string;
+      displayName: string;
+      googleId: string;
+      emailVerifiedAt: Date;
+    }) {
       return prisma.$transaction(async (tx) => {
         const user = await tx.user.create({ data });
 

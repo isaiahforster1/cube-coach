@@ -63,6 +63,13 @@ describe('signing in with Google', () => {
     expect(user.passwordHash).toBeNull();
   });
 
+  /** Google has already proved the address, so there is nothing left for us to check. */
+  it('treats the email of a new Google account as verified', async () => {
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
+  });
+
   it('gives the new account a practice session, like any other', async () => {
     const { user } = await authService.signInWithGoogle(profile(), null);
 
@@ -103,6 +110,14 @@ describe('signing in with Google', () => {
     // The password was never proved to belong to the address, so it does not survive the
     // link. Google's verified email is the first real proof of ownership.
     expect(user.passwordHash).toBeNull();
+  });
+
+  it('marks the email verified when linking, because Google proved it', async () => {
+    await registerWithPassword();
+
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
   });
 
   /**

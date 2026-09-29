@@ -17,7 +17,13 @@ function mockSignedIn() {
               status: 200,
               json: () =>
                 Promise.resolve({
-                  user: { id: 'u1', email: 'a@b.test', displayName: 'Cuber', createdAt: '' },
+                  user: {
+                    id: 'u1',
+                    email: 'a@b.test',
+                    displayName: 'Cuber',
+                    emailVerified: true,
+                    createdAt: '',
+                  },
                 }),
             }
           : {

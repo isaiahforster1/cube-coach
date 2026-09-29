@@ -32,7 +32,15 @@ function mockSignedIn({ failUploads = false } = {}) {
           ok: true,
           status: 200,
           json: () =>
-            Promise.resolve({ user: { id: 'u1', email: 'a@b', displayName: 'C', createdAt: '' } }),
+            Promise.resolve({
+              user: {
+                id: 'u1',
+                email: 'a@b',
+                displayName: 'C',
+                emailVerified: true,
+                createdAt: '',
+              },
+            }),
         });
       }
 

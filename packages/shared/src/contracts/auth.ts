@@ -53,6 +53,8 @@ export const publicUserSchema = z.object({
   id: z.uuid(),
   email: z.string(),
   displayName: z.string(),
+  /** Whether the address has been proved to belong to this account (ADR-0019). */
+  emailVerified: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 
