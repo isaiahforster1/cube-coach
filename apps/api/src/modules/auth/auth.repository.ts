@@ -46,6 +46,14 @@ export function createAuthRepository(prisma: PrismaClient) {
       return user;
     },
 
+    /**
+     * Attach a Google identity to an account whose email was already verified. Its
+     * password and sessions were proved, so there is nothing to discard.
+     */
+    linkGoogleAccountToVerified(userId: string, googleId: string) {
+      return prisma.user.update({ where: { id: userId }, data: { googleId } });
+    },
+
     /** A Google account has no password, so it is created without one. */
     createGoogleUser(data: {
       email: string;

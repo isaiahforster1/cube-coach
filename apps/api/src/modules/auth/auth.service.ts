@@ -85,11 +85,12 @@ export function createAuthService(repository: AuthRepository) {
      * could create a Google account claiming someone else's address could take over their
      * CubeCoach account — which is the classic way this integration goes wrong.
      *
-     * The check covers only half of it. Registration does not verify email either, so the
-     * account being linked into may have been prepared by an attacker who registered the
-     * victim's address first ("pre-hijacking"). The verified Google identity is therefore
+     * The check covers only half of it. The account being linked into may have been
+     * prepared by an attacker who registered the victim's address first
+     * ("pre-hijacking"). If that account never verified its email, the Google identity is
      * the first real proof of ownership, and linking discards everything that came before
-     * it: the password is cleared and every existing session is revoked.
+     * it: the password is cleared and every existing session is revoked. If it did verify,
+     * its password was proved too, and it survives (ADR-0019).
      */
     async signInWithGoogle(
       profile: GoogleProfile,
@@ -122,7 +123,16 @@ export function createAuthService(repository: AuthRepository) {
       }
 
       if (existing !== null) {
-        const user = await repository.linkGoogleAccount(existing.id, profile.sub, new Date());
+        // A verified email means the password was proved by someone who also reads the
+        // inbox, so it survives. Otherwise the credentials are discarded (ADR-0019).
+        //
+        // Deciding on a value read a moment ago is safe here. The only change that can
+        // happen in between is an address becoming verified, and missing it only means
+        // discarding a password that could have been kept: the cautious side.
+        const user =
+          existing.emailVerifiedAt === null
+            ? await repository.linkGoogleAccount(existing.id, profile.sub, new Date())
+            : await repository.linkGoogleAccountToVerified(existing.id, profile.sub);
         return { user, token: await this.startSession(user.id, userAgent) };
       }
 

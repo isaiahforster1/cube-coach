@@ -150,6 +150,60 @@ describe('signing in with Google', () => {
     expect(response.statusCode).toBe(401);
   });
 
+  /**
+   * ADR-0018 rule 3, now that verification exists. A verified password was proved by
+   * someone who both knew it and read the inbox, so it is a proved credential and the
+   * link has nothing to discard.
+   */
+  describe('when the password account has verified its email', () => {
+    async function registerAndVerify(): Promise<string> {
+      const cookie = await registerWithPassword();
+      const link = context.emails.sent.at(-1)?.text ?? '';
+      const token = /#token=([\w-]+)/u.exec(link)?.[1] ?? '';
+
+      const response = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/verify-email',
+        payload: { token },
+        cookies: { [SESSION_COOKIE]: cookie },
+      });
+      expect(response.statusCode).toBe(200);
+      return cookie;
+    }
+
+    it('keeps the password', async () => {
+      await registerAndVerify();
+
+      const { user } = await authService.signInWithGoogle(profile(), null);
+      expect(user.passwordHash).not.toBeNull();
+
+      const login = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { email: 'cuber@example.com', password: 'a-long-enough-password' },
+      });
+      expect(login.statusCode).toBe(200);
+    });
+
+    /** Every session was started by someone holding the proved password. */
+    it('keeps the sessions that already existed', async () => {
+      const cookie = await registerAndVerify();
+
+      await authService.signInWithGoogle(profile(), null);
+
+      expect((await me(cookie)).statusCode).toBe(200);
+    });
+  });
+
+  it('still clears a password whose email was never verified', async () => {
+    const cookie = await registerWithPassword();
+
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.passwordHash).toBeNull();
+    expect((await me(cookie)).statusCode).toBe(401);
+  });
+
   it('keeps the original display name when linking', async () => {
     await context.app.inject({
       method: 'POST',
