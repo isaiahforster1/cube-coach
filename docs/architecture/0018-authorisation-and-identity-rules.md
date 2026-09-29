@@ -135,8 +135,7 @@ The per-account limits and the analysis window are numbers chosen by judgement (
 minute, 10 batches a minute, 1000 solves). They should be revisited if real use pushes
 against them, not quietly raised.
 
-**What is still open.** Registration does not verify email.
-`POST /auth/logout-all` exists, but the client has no button for it yet. Statistics still load a user's
+**What is still open.** Registration does not verify email. Statistics still load a user's
 whole history into memory; a cached summary updated on write is the next step if histories
 reach hundreds of thousands of solves.
 

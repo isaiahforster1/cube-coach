@@ -1,7 +1,8 @@
 import type { ReactElement, ReactNode } from 'react';
 import { Link, NavLink } from 'react-router';
-import { useLogout, useSession } from '../features/auth/use-session.js';
+import { useSession } from '../features/auth/use-session.js';
 import { GuestMigrationNotice } from '../features/guest/GuestMigrationNotice.js';
+import { AccountMenu } from './AccountMenu.js';
 
 /**
  * Shared chrome for every page.
@@ -19,7 +20,6 @@ export function AppLayout({
   fillsViewport?: boolean;
 }): ReactElement {
   const { data: user, isPending } = useSession();
-  const logout = useLogout();
 
   return (
     /*
@@ -70,13 +70,7 @@ export function AppLayout({
         ) : (
           <div className="flex shrink-0 items-center gap-3">
             <span className="hidden text-sm text-slate-500 sm:inline">{user.displayName}</span>
-            <button
-              type="button"
-              onClick={() => logout.mutate()}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Sign out
-            </button>
+            <AccountMenu displayName={user.displayName} />
           </div>
         )}
       </header>
