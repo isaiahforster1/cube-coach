@@ -70,7 +70,7 @@ export function AppLayout({
         ) : (
           <div className="flex shrink-0 items-center gap-3">
             <span className="hidden text-sm text-slate-500 sm:inline">{user.displayName}</span>
-            <AccountMenu displayName={user.displayName} />
+            <AccountMenu user={user} />
           </div>
         )}
       </header>

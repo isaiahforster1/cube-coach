@@ -46,7 +46,10 @@ function mockSignedIn() {
   return fetchMock;
 }
 
-function posts(fetchMock: ReturnType<typeof mockSignedIn>, path: string) {
+function posts(
+  fetchMock: { mock: { calls: readonly (readonly [string, (RequestInit | undefined)?])[] } },
+  path: string,
+) {
   return fetchMock.mock.calls.filter(
     ([url, options]) => String(url).endsWith(path) && options?.method === 'POST',
   );
@@ -164,5 +167,84 @@ describe('account menu', () => {
     await user.click(screen.getByText('page'));
 
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+});
+
+/**
+ * An unconfirmed address is mentioned inside the account menu and nowhere else. The
+ * account works without it (ADR-0012), so it earns no banner, but someone who wants their
+ * password to survive a later Google sign-in needs a way to confirm it.
+ */
+describe('email confirmation in the account menu', () => {
+  function mockAccount({ verified, available }: { verified: boolean; available: boolean }) {
+    const fetchMock = vi.fn((url: string, _options?: RequestInit) => {
+      const json = (body: unknown) => Promise.resolve(body);
+      if (url.endsWith('/auth/me')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            json({
+              user: {
+                id: 'u1',
+                email: 'a@b.test',
+                displayName: 'Cuber',
+                emailVerified: verified,
+                createdAt: '',
+              },
+            }),
+        });
+      }
+      if (url.endsWith('/auth/providers')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => json({ password: true, google: false, emailVerification: available }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 204, json: () => json(undefined) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('offers a new link when the address is not confirmed', async () => {
+    const fetchMock = mockAccount({ verified: false, available: true });
+    const user = userEvent.setup();
+    renderWithProviders(<AppLayout>page</AppLayout>);
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    expect(await screen.findByText('Email not confirmed')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Send a new link' }));
+
+    await waitFor(() => expect(posts(fetchMock, '/auth/resend-verification')).toHaveLength(1));
+    expect(await screen.findByRole('status')).toHaveTextContent(/on its way/iu);
+  });
+
+  it('says nothing once the address is confirmed', async () => {
+    mockAccount({ verified: true, available: true });
+    const user = userEvent.setup();
+    renderWithProviders(<AppLayout>page</AppLayout>);
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+
+    expect(screen.queryByText('Email not confirmed')).toBeNull();
+  });
+
+  /** A button that can only fail is worse than none. */
+  it('says nothing when the server cannot send email', async () => {
+    const fetchMock = mockAccount({ verified: false, available: false });
+    const user = userEvent.setup();
+    renderWithProviders(<AppLayout>page</AppLayout>);
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/auth/providers'))).toBe(
+        true,
+      ),
+    );
+
+    expect(screen.queryByText('Email not confirmed')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Send a new link' })).toBeNull();
   });
 });

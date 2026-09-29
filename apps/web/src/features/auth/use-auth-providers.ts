@@ -4,6 +4,8 @@ import { api } from '../../lib/api-client.js';
 export interface AuthProviders {
   readonly password: boolean;
   readonly google: boolean;
+  /** Whether the server can email a confirmation link. */
+  readonly emailVerification: boolean;
 }
 
 /**

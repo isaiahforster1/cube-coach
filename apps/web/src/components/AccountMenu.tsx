@@ -1,4 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
+import type { PublicUser } from '@cube-coach/shared';
+import { ResendVerificationButton } from '../features/auth/ResendVerificationButton.js';
+import { useAuthProviders } from '../features/auth/use-auth-providers.js';
 import { useLogout } from '../features/auth/use-session.js';
 
 /**
@@ -12,8 +15,10 @@ import { useLogout } from '../features/auth/use-session.js';
  * promises arrow-key navigation, and claiming it without providing that is worse than not
  * claiming it at all.
  */
-export function AccountMenu({ displayName }: { displayName: string }): ReactElement {
+export function AccountMenu({ user }: { user: PublicUser }): ReactElement {
   const [open, setOpen] = useState(false);
+  const { data: providers } = useAuthProviders();
+  const offerConfirmation = !user.emailVerified && providers?.emailVerification === true;
   const container = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
@@ -71,7 +76,20 @@ export function AccountMenu({ displayName }: { displayName: string }): ReactElem
           id={panelId}
           className="absolute right-0 z-10 mt-2 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
         >
-          <p className="truncate px-3 py-2 text-xs text-slate-500">Signed in as {displayName}</p>
+          <p className="truncate px-3 py-2 text-xs text-slate-500">
+            Signed in as {user.displayName}
+          </p>
+          {/*
+            Here and nowhere else. The account works without a confirmed address
+            (ADR-0012), so it earns no banner; confirming only matters to someone who wants
+            their password kept if they later sign in with Google.
+          */}
+          {offerConfirmation && (
+            <div className="border-y border-slate-100 px-3 py-2">
+              <p className="text-sm text-slate-700">Email not confirmed</p>
+              <ResendVerificationButton className="mt-1" />
+            </div>
+          )}
           <button
             type="button"
             onClick={signOut}
