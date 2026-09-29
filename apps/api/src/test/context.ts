@@ -25,6 +25,7 @@ export interface CreateTestContextOptions {
     readonly solveMax?: number;
     readonly solveBatchMax?: number;
     readonly verificationMax?: number;
+    readonly resendMax?: number;
   };
   /** A directory of built client files, for the tests that cover serving them. */
   readonly webRoot?: string;
@@ -78,6 +79,7 @@ export async function createTestContext(
       solveMax: options.rateLimit?.solveMax ?? 100_000,
       solveBatchMax: options.rateLimit?.solveBatchMax ?? 100_000,
       verificationMax: options.rateLimit?.verificationMax ?? 100_000,
+      resendMax: options.rateLimit?.resendMax ?? 100_000,
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
     ...(options.google === undefined ? {} : { google: options.google }),

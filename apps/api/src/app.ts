@@ -55,6 +55,7 @@ export interface BuildAppOptions {
     readonly solveMax?: number;
     readonly solveBatchMax?: number;
     readonly verificationMax?: number;
+    readonly resendMax?: number;
   };
   /**
    * Where the built web client lives, when this process is serving it too.
@@ -249,6 +250,7 @@ export async function buildApp({
       if (emailVerification !== null) {
         registerEmailVerificationRoutes(instance, emailVerification, {
           verificationMax: limits?.verificationMax ?? 10,
+          resendMax: limits?.resendMax ?? 3,
         });
       }
       registerAuthProviderRoutes(instance, google !== null);

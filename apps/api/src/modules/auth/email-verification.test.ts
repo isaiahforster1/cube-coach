@@ -248,3 +248,99 @@ describe('POST /auth/verify-email', () => {
     }
   });
 });
+
+function resend(cookie: string | undefined, app = context.app, payload: object = {}) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/resend-verification',
+    payload,
+    ...(cookie === undefined ? {} : { cookies: { [SESSION_COOKIE]: cookie } }),
+  });
+}
+
+describe('POST /auth/resend-verification', () => {
+  it('sends a fresh link to the signed-in account', async () => {
+    const { cookie } = await registerAndReadLink();
+
+    const response = await resend(cookie);
+
+    expect(response.statusCode).toBe(204);
+    expect(context.emails.sent).toHaveLength(2);
+    expect(context.emails.sent[1]?.to).toBe(CREDENTIALS.email);
+    expect((await verify(tokenFromLatestEmail(), cookie)).statusCode).toBe(200);
+  });
+
+  it('makes the earlier link useless', async () => {
+    const { cookie, token: first } = await registerAndReadLink();
+
+    await resend(cookie);
+
+    expect((await verify(first, cookie)).statusCode).toBe(400);
+    expect(await context.prisma.emailVerificationToken.count()).toBe(1);
+  });
+
+  /**
+   * It takes no address, only the session, so it cannot be pointed at anyone else's inbox
+   * and cannot be used to ask which addresses have accounts.
+   */
+  it('ignores any address in the request and sends only to the account', async () => {
+    const { cookie } = await registerAndReadLink();
+
+    await resend(cookie, context.app, { email: 'someone-else@example.com' });
+
+    expect(context.emails.sent.map((message) => message.to)).toEqual([
+      CREDENTIALS.email,
+      CREDENTIALS.email,
+    ]);
+  });
+
+  it('sends nothing once the address is verified', async () => {
+    const { cookie, token } = await registerAndReadLink();
+    await verify(token, cookie);
+
+    const response = await resend(cookie);
+
+    expect(response.statusCode).toBe(204);
+    expect(context.emails.sent).toHaveLength(1);
+  });
+
+  it('requires a signed-in user', async () => {
+    expect((await resend(undefined)).statusCode).toBe(401);
+    expect(context.emails.sent).toHaveLength(0);
+  });
+
+  /** Asked for directly, so unlike at registration, a failure is the answer. */
+  it('says so when the email cannot be sent', async () => {
+    const failing = createFakeEmailSender();
+    const broken = await createTestContext({ emailSender: failing });
+
+    try {
+      await broken.reset();
+      const cookie = sessionCookie(await register({}, broken.app));
+      failing.failFromNowOn();
+
+      const response = await resend(cookie, broken.app);
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error.code).toBe('EMAIL_NOT_SENT');
+    } finally {
+      await broken.close();
+    }
+  });
+
+  /** Each request sends an email from our domain, so it is limited per account. */
+  it('is rate limited per account', async () => {
+    const limited = await createTestContext({ rateLimit: { resendMax: 2 } });
+
+    try {
+      await limited.reset();
+      const cookie = sessionCookie(await register({}, limited.app));
+
+      expect((await resend(cookie, limited.app)).statusCode).toBe(204);
+      expect((await resend(cookie, limited.app)).statusCode).toBe(204);
+      expect((await resend(cookie, limited.app)).statusCode).toBe(429);
+    } finally {
+      await limited.close();
+    }
+  });
+});
