@@ -2304,3 +2304,25 @@ Three details carry the design:
 
 > "The app gets rows, the migrator gets schema. Grants cover today's tables; default
 > privileges cover tomorrow's."
+
+### Teach-back: H1, to answer in your own words
+
+Not yet explained back. Answer each out loud before reading the entries above, then compare.
+If an answer doesn't hold up, that is the part to re-read.
+
+1. **Walk through the attack step by step.** Who does what, in what order, and at what
+   point does the attacker gain access to the victim's data?
+2. **We already refused unverified Google emails. Why wasn't that enough?** What exactly
+   did `email_verified` prove, and what did it not prove?
+3. **Why clear the password rather than keep it?** The real owner might have set it. What
+   does the server know, and what can't it know?
+4. **Suppose the password was cleared but sessions were not revoked.** What does the
+   attacker still have, and for how long? (Hint: the session expiry is absolute, 30 days
+   from sign-in.)
+5. **Why must the two writes share one transaction?** Describe the state the database is
+   left in if the second write fails.
+6. **If registration verified email, what would change about this fix?** Would the password
+   still need clearing? Would the sessions still need revoking?
+7. **Follow-up an interviewer might add:** the fix discards credentials. What does a
+   genuine user who registered with a password experience afterwards, and how would you
+   explain that trade-off to a product owner?
