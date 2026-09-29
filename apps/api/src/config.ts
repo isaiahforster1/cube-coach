@@ -44,6 +44,22 @@ const environmentSchema = z.object({
   GOOGLE_REDIRECT_URI: z.string().optional(),
 
   /**
+   * Email through Resend, used for verification links. Optional: without it, development
+   * writes emails to the log, and production offers no verification (see ADR-0019).
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  /** The sender, on a domain verified in Resend, e.g. `CubeCoach <verify@mail.example>`. */
+  EMAIL_FROM: z.string().min(1).optional(),
+
+  /**
+   * The public address of the app, for building absolute links in emails.
+   *
+   * Configured rather than taken from the request's Host header, which the client
+   * controls: a link built from it would let anyone send our users to their own site.
+   */
+  APP_URL: z.url().optional(),
+
+  /**
    * Where the built web client lives, for the production server that hosts both.
    *
    * Left unset in development, where Vite serves the client on its own port. See
@@ -64,12 +80,37 @@ const DEVELOPMENT_WEB_ORIGIN = 'http://localhost:5173';
  * production deploy that did not set the variable quietly allowed `localhost:5173` to
  * make credentialed requests, and sent Google sign-ins there.
  */
-const configSchema = environmentSchema.transform((environment) => ({
-  ...environment,
-  WEB_ORIGIN:
-    environment.WEB_ORIGIN ??
-    (environment.NODE_ENV === 'production' ? undefined : DEVELOPMENT_WEB_ORIGIN),
-}));
+const configSchema = environmentSchema
+  .superRefine((environment, context) => {
+    if (environment.RESEND_API_KEY !== undefined && environment.EMAIL_FROM === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['EMAIL_FROM'],
+        message: 'EMAIL_FROM is required when RESEND_API_KEY is set',
+      });
+    }
+    if (
+      environment.NODE_ENV === 'production' &&
+      environment.RESEND_API_KEY !== undefined &&
+      environment.APP_URL === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['APP_URL'],
+        message: 'APP_URL is required in production when email is configured',
+      });
+    }
+  })
+  .transform((environment) => {
+    const developmentDefault =
+      environment.NODE_ENV === 'production' ? undefined : DEVELOPMENT_WEB_ORIGIN;
+    return {
+      ...environment,
+      WEB_ORIGIN: environment.WEB_ORIGIN ?? developmentDefault,
+      // In development the app is reached through Vite, so that is where links point.
+      APP_URL: environment.APP_URL ?? developmentDefault,
+    };
+  });
 
 export type Config = z.infer<typeof configSchema>;
 

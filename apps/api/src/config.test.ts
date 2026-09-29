@@ -47,6 +47,46 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...valid, WEB_ORIGIN: 'localhost' })).toThrow(/WEB_ORIGIN/u);
   });
 
+  describe('email', () => {
+    const resend = { RESEND_API_KEY: 're_key', EMAIL_FROM: 'CubeCoach <verify@example.com>' };
+
+    it('is optional', () => {
+      const config = loadConfig(valid);
+      expect(config.RESEND_API_KEY).toBeUndefined();
+      expect(config.EMAIL_FROM).toBeUndefined();
+    });
+
+    it('needs a sender address to go with the API key', () => {
+      expect(() => loadConfig({ ...valid, RESEND_API_KEY: 're_key' })).toThrow(/EMAIL_FROM/u);
+    });
+
+    /**
+     * The link in an email has to be absolute, and building it from the request's Host
+     * header would let anyone who can set that header send our users a link to their own
+     * site. So production states its address, and a development default never applies.
+     */
+    it('needs the public app URL in production', () => {
+      expect(() => loadConfig({ ...valid, ...resend, NODE_ENV: 'production' })).toThrow(/APP_URL/u);
+
+      const config = loadConfig({
+        ...valid,
+        ...resend,
+        NODE_ENV: 'production',
+        APP_URL: 'https://cubecoach.example.com',
+      });
+      expect(config.APP_URL).toBe('https://cubecoach.example.com');
+    });
+
+    it('defaults the app URL to the Vite dev server outside production', () => {
+      expect(loadConfig(valid).APP_URL).toBe('http://localhost:5173');
+      expect(loadConfig({ ...valid, NODE_ENV: 'production' }).APP_URL).toBeUndefined();
+    });
+
+    it('rejects an app URL that is not a URL', () => {
+      expect(() => loadConfig({ ...valid, APP_URL: 'cubecoach.example.com' })).toThrow(/APP_URL/u);
+    });
+  });
+
   it('rejects an unknown log level', () => {
     expect(() => loadConfig({ ...valid, LOG_LEVEL: 'chatty' })).toThrow(/LOG_LEVEL/u);
   });
