@@ -16,6 +16,7 @@ import { createPracticeSessionsService } from './modules/practice-sessions/pract
 import { createSolvesRepository } from './modules/solves/solves.repository.js';
 import { registerSolveRoutes } from './modules/solves/solves.routes.js';
 import { createSolvesService } from './modules/solves/solves.service.js';
+import { registerSolverRoutes } from './modules/solver/solver.routes.js';
 import { registerStatsRoutes } from './modules/stats/stats.routes.js';
 import { createStatsService } from './modules/stats/stats.service.js';
 import { registerAuthentication } from './plugins/authenticate.js';
@@ -44,6 +45,7 @@ export interface BuildAppOptions {
   readonly rateLimit?: {
     readonly max?: number;
     readonly credentialMax?: number;
+    readonly solverMax?: number;
   };
   /**
    * Where the built web client lives, when this process is serving it too.
@@ -164,6 +166,7 @@ export async function buildApp({
       registerPracticeSessionRoutes(instance, practiceSessionsService);
       registerSolveRoutes(instance, solvesService);
       registerStatsRoutes(instance, statsService);
+      registerSolverRoutes(instance, limits?.solverMax ?? 30);
     },
     { prefix: '/api/v1' },
   );

@@ -1,6 +1,6 @@
 /**
  * The step solver (ADR-0021). Deterministic, no I/O. The cross, F2L and the facts each
- * step's explanation is built from; the package root exports this once there is a caller.
+ * step's explanation is built from. The API's solver route is its caller.
  */
 export { solveCross, type CrossStep } from './cross.js';
 export {

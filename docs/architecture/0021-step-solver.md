@@ -334,6 +334,38 @@ unchanged, and no solve failed. The budget is still met about fourteen times ove
   to land only on moves the step also contains. A planted bug that inverted the printed rotation was caught by both the worked
   example and the property.
 
+### Serving the steps (step 6)
+
+`GET /api/v1/solver/steps?scramble=…&crossFace=D` returns the cross and each pair, with
+their tokens and the template's text. The web app shows them at `/solver`, and each
+history row links there with its scramble.
+
+- **The server writes the text, although the browser could.** The solver is in the shared
+  package, and the scramble rating already runs in the browser. The explanation will not:
+  the model needs a key the browser must never hold, and the gate has to run where the
+  model's text arrives. Serving the template from the same route now means the response
+  does not change shape when the model is added. Where its text goes is marked by an
+  `undefined` passed to `chooseExplanation`. No provider interface exists until there is a
+  provider.
+- **GET, open to guests.** Solving changes nothing, and the same question always gets the
+  same answer, so the request is safe and idempotent, and a solution is a link. Like every
+  feature it needs no account (ADR-0012). Its rate limit is 30 a minute, below the global 300. The solve blocks the event loop for up to about 40 ms, and a model will add cost.
+- **The scramble rule is in the contract.** `solverStepsQuerySchema` parses the scramble
+  with `parseAlgorithm`, so a rotation or wide turn is refused as `VALIDATION_FAILED`
+  before the solver sees it. The page runs the same schema and does not send what it
+  would refuse.
+- **Colour names moved to the contract.** The server now writes "the green–red pair", so it
+  needs the scheme. `STANDARD_COLOUR_NAMES` is in `contracts/solver.ts`, and the web app's
+  `FACE_NAMES` is that same object, so the sentence and the stickers beside it cannot
+  disagree. A per-user scheme would have to travel in the request.
+- **Exported by name.** The package root lists the solver's exports instead of using
+  `export *`. The oracle's `isFirstTwoLayersSolved` judges against the centres, and the
+  one in `algorithms/` judges a fixed-frame cube. They have the same name but answer
+  different questions, so the oracle stays inside `solver/`.
+- **Reading the real output found a bug the tests had locked in.** "The pair already
+  solved stay solved" was in the worked example's expected text. The verb now agrees, and
+  a plural case is tested too.
+
 ## Alternatives considered
 
 **Rotated state, judged against centres.** This is option 1 above. Every predicate would

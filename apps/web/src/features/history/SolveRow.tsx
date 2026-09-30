@@ -1,5 +1,7 @@
 import type { ReactElement } from 'react';
+import { Link } from 'react-router';
 import { formatSolve, type Penalty, type Solve } from '@cube-coach/shared';
+import { solverPath } from '../solver/SolverPage.js';
 
 export interface SolveRowProps {
   readonly solve: Solve;
@@ -29,9 +31,17 @@ export function SolveRow({ solve, index, onSetPenalty, onDelete }: SolveRowProps
         {formatSolve(solve.durationMs, solve.penalty)}
       </span>
 
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500">
+      {/*
+        The scramble is the link, rather than another button in an already full row. The
+        label says where it goes, since the visible text is only notation.
+      */}
+      <Link
+        to={solverPath(solve.scramble)}
+        aria-label={`Solve scramble ${index} step by step`}
+        className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500 underline-offset-2 hover:text-sky-700 hover:underline"
+      >
         {solve.scramble}
-      </span>
+      </Link>
 
       <time dateTime={solve.solvedAt} className="shrink-0 text-xs text-slate-400">
         {TIME_FORMAT.format(new Date(solve.solvedAt))}

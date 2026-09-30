@@ -1,11 +1,11 @@
-import type { Face } from '@cube-coach/shared';
+import { STANDARD_COLOUR_NAMES, type Face } from '@cube-coach/shared';
 
 /**
  * The standard Western colour scheme.
  *
  * The engine labels stickers by face, not colour, precisely so that the mapping lives
- * here in the interface. Someone using a Japanese-scheme cube, or a colour-blind user
- * needing a different palette, changes this file and nothing else.
+ * in the interface. Someone using a Japanese-scheme cube, or a colour-blind user
+ * needing a different palette, changes these tables and nothing in the engine.
  */
 export const FACE_COLOURS: Record<Face, string> = {
   U: '#f8fafc',
@@ -16,11 +16,9 @@ export const FACE_COLOURS: Record<Face, string> = {
   L: '#f97316',
 };
 
-export const FACE_NAMES: Record<Face, string> = {
-  U: 'white',
-  D: 'yellow',
-  F: 'green',
-  B: 'blue',
-  R: 'red',
-  L: 'orange',
-};
+/**
+ * The names come from the shared contract, because the server writes solver explanations
+ * ("the green–red pair") in them. One table means the sentence and the stickers beside it
+ * cannot disagree. A different scheme changes it there.
+ */
+export const FACE_NAMES: Readonly<Record<Face, string>> = STANDARD_COLOUR_NAMES;

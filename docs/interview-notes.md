@@ -2525,3 +2525,68 @@ grew section by section.
   though it only prints output?
 - Why run the per-commit checks in a separate worktree rather than stashing the rest of
   the working copy?
+
+## Serving the steps (solve coaching, part 8)
+
+### Why does the server run the solver when the browser already has it?
+
+The browser could run the solver and the template: both are pure functions in
+`packages/shared`, and the scramble rating already runs there. The part that cannot run
+there is the model. Its API key would be visible to anyone who opens dev tools, and the
+notation gate has to run where the model's text arrives, before anyone reads it. Putting
+the route on the server now, with only the template behind it, means the web app's
+contract does not change when the model is added. The cost is a network round trip for
+something the browser could compute. That cost is accepted to avoid moving the feature
+later.
+
+### Why GET and not POST?
+
+GET means the request is safe (it changes nothing) and idempotent (repeating it gives the
+same result). Solving a scramble is both. That allows caching and lets a solution be a
+link, which the history page uses. The usual reasons for POST do not apply here. The body
+would be a scramble of at most 500 characters, and a scramble is not sensitive, so having
+it in a URL or a log is fine.
+
+### Why a separate rate limit for one route?
+
+The global limit is set for cheap requests. This route does 4 to 40 ms of synchronous CPU
+work per request, and while it runs the event loop can serve no one else. It needs no
+account, so the only thing that limits a script calling it is the rate limit. Once a model
+writes the text, every call will also cost money. The limit is a parameter, like
+`credentialMax`. That lets the tests raise it out of the way, and one test lowers it to
+prove it fires.
+
+### Why does the root export the solver by name?
+
+`export *` from two modules that both export the same name is a compile error in
+TypeScript (TS2308), and that error is useful here. `isFirstTwoLayersSolved` exists twice.
+The oracle's version compares stickers with the centres, and the `algorithms/` version
+compares them with a fixed frame. They have the same name but answer different questions.
+Listing the solver's exports makes the public surface a decision. The oracle is a test
+tool, so it stays internal.
+
+### What does the URL-as-state pattern buy on the page?
+
+The text field is a draft, and the URL is what is being solved. Submitting writes the URL.
+The query reads from the URL, and React Query caches by the normalised scramble and face.
+Back, forward, reload and a shared link all work without any code for them, because there
+is no second copy of the state that could fall out of sync.
+
+### Questions to answer out loud, without notes
+
+- The route returns `explanation.source` but not the refused notation (`unknown`). Who is
+  each field for, and what would go wrong if the client could see the refused text?
+- The API test takes its expected tokens from calling `solveCross` and `solveF2L` directly.
+  Isn't that testing the code against itself? What does it prove, and what does it leave
+  to another suite?
+- The route is synchronous CPU work inside an async handler. What happens to other
+  requests while it runs? At what point would you move it to a worker thread, and how
+  would you know you had reached that point?
+- The page validates the scramble with the same schema as the server. Why is the server
+  check still needed?
+- `staleTime: Infinity` is right for the template today. What changes when a model writes
+  the text, and is the answer still "the same question always gets the same answer"?
+- The worked-example test expected "The pair already solved stay solved". What kind of
+  test locks a bug in place, and what caught it here instead?
+- `STANDARD_COLOUR_NAMES` moved from the web app into the shared contract. Argue against
+  that move, then say what would have to be true for your argument to win.
