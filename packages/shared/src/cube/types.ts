@@ -36,6 +36,26 @@ export type Turn = (typeof TURNS)[number];
 export type Move = `${Face}${Turn}`;
 
 /**
+ * The three axes the whole cube can be turned about. `x` follows R, `y` follows U and
+ * `z` follows F, which is the standard convention.
+ */
+export const AXES = ['x', 'y', 'z'] as const;
+
+export type Axis = (typeof AXES)[number];
+
+/**
+ * A whole-cube rotation: `'x' | "x'" | 'x2' | 'y' | ...`
+ *
+ * Deliberately *not* part of {@link Move}. Scrambles, the algorithm library, the cross
+ * search and the renderer all take `Move`, and a rotation reaching any of them would be
+ * a bug — so the type system keeps it out. See ADR-0020.
+ */
+export type Rotation = `${Axis}${Turn}`;
+
+/** Anything that can appear in a sequence a person follows: a face turn or a rotation. */
+export type Token = Move | Rotation;
+
+/**
  * A cube position: 54 stickers, each labelled with the face it belongs to when solved.
  *
  * Index layout — each face is read left-to-right, top-to-bottom, as seen from outside:
@@ -53,6 +73,10 @@ export type Move = `${Face}${Turn}`;
  *               30 31 32
  *               33 34 35
  * ```
+ *
+ * Face turns never move a centre, so a state reached by `Move`s alone always has each
+ * centre at home. A {@link Rotation} moves centres; after one, "the U face" means the
+ * top of the cube as held, and its stickers may be labelled with some other face.
  *
  * Stickers are labelled by face, not by colour. Colour is a display concern and lives
  * in the UI, so the engine stays independent of any particular colour scheme.

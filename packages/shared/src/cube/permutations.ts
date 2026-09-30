@@ -1,4 +1,14 @@
-import { FACELET_COUNT, FACELETS_PER_FACE, FACES, type Face, type Move } from './types.js';
+import {
+  AXES,
+  FACELET_COUNT,
+  FACELETS_PER_FACE,
+  FACES,
+  type Axis,
+  type Face,
+  type Move,
+  type Rotation,
+  type Token,
+} from './types.js';
 
 /**
  * A permutation describes a move as a lookup table.
@@ -91,9 +101,24 @@ const ADJACENT_STRIPS: Record<Face, readonly [Strip, Strip, Strip, Strip]> = {
  */
 const ROTATE_FACE_CLOCKWISE: readonly number[] = [6, 3, 0, 7, 4, 1, 8, 5, 2];
 
+function identity(): number[] {
+  return Array.from({ length: FACELET_COUNT }, (_, index) => index);
+}
+
+/** Shift four strips one step around their cycle, writing into `permutation`. */
+function cycleStrips(permutation: number[], strips: readonly [Strip, Strip, Strip, Strip]): void {
+  for (let s = 0; s < strips.length; s += 1) {
+    const source = at(strips, s);
+    const destination = at(strips, (s + 1) % strips.length);
+    for (let k = 0; k < source.length; k += 1) {
+      permutation[at(destination, k)] = at(source, k);
+    }
+  }
+}
+
 function buildQuarterTurn(face: Face): Permutation {
   // Start from the identity: every sticker the move does not touch stays put.
-  const permutation = Array.from({ length: FACELET_COUNT }, (_, index) => index);
+  const permutation = identity();
 
   // 1. The turning face spins in place.
   const offset = FACES.indexOf(face) * FACELETS_PER_FACE;
@@ -102,14 +127,7 @@ function buildQuarterTurn(face: Face): Permutation {
   }
 
   // 2. The four surrounding strips shift one step around the face.
-  const strips = ADJACENT_STRIPS[face];
-  for (let s = 0; s < strips.length; s += 1) {
-    const source = at(strips, s);
-    const destination = at(strips, (s + 1) % strips.length);
-    for (let k = 0; k < source.length; k += 1) {
-      permutation[at(destination, k)] = at(source, k);
-    }
-  }
+  cycleStrips(permutation, ADJACENT_STRIPS[face]);
 
   return permutation;
 }
@@ -145,3 +163,93 @@ export const MOVE_PERMUTATIONS: Record<Move, Permutation> = (() => {
 
   return table as Record<Move, Permutation>;
 })();
+
+/**
+ * Each axis of rotation: the face a rotation follows, the face opposite it, and the
+ * middle layer between them.
+ *
+ * The middle layer is four strips of three in exactly the format of
+ * {@link ADJACENT_STRIPS}, in the order a clockwise turn of `follows` carries them.
+ * Each strip lies beside the matching strip of `follows`, one step further into the
+ * cube, and runs the same way. These 36 numbers are the only new hand-entered data that
+ * rotations need, and the geometry test checks them. See ADR-0020.
+ */
+const AXIS_LAYERS: Record<
+  Axis,
+  { follows: Face; opposite: Face; middle: readonly [Strip, Strip, Strip, Strip] }
+> = {
+  // U → B → D → F, like R
+  x: {
+    follows: 'R',
+    opposite: 'L',
+    middle: [
+      [1, 4, 7],
+      [52, 49, 46],
+      [28, 31, 34],
+      [19, 22, 25],
+    ],
+  },
+  // R → F → L → B, like U
+  y: {
+    follows: 'U',
+    opposite: 'D',
+    middle: [
+      [12, 13, 14],
+      [21, 22, 23],
+      [39, 40, 41],
+      [48, 49, 50],
+    ],
+  },
+  // U → R → D → L, like F
+  z: {
+    follows: 'F',
+    opposite: 'B',
+    middle: [
+      [3, 4, 5],
+      [10, 13, 16],
+      [32, 31, 30],
+      [43, 40, 37],
+    ],
+  },
+};
+
+/**
+ * A quarter rotation is three layers turning together: the face it follows, the middle
+ * layer, and the opposite face turning the other way — `x` is R, the middle, and L'.
+ *
+ * The three layers share no stickers, so the order they are composed in does not matter.
+ * Reusing the face turns means the only new data is the middle layer.
+ */
+function buildQuarterRotation(axis: Axis): Permutation {
+  const { follows, opposite, middle } = AXIS_LAYERS[axis];
+
+  const middleTurn = identity();
+  cycleStrips(middleTurn, middle);
+
+  return compose(
+    compose(MOVE_PERMUTATIONS[follows], middleTurn),
+    MOVE_PERMUTATIONS[`${opposite}'`],
+  );
+}
+
+/** Every rotation, derived from the three quarter rotations the same way as face turns. */
+export const ROTATION_PERMUTATIONS: Record<Rotation, Permutation> = (() => {
+  const table: Partial<Record<Rotation, Permutation>> = {};
+
+  for (const axis of AXES) {
+    const quarter = buildQuarterRotation(axis);
+    const half = compose(quarter, quarter);
+
+    table[axis] = quarter;
+    table[`${axis}2`] = half;
+    table[`${axis}'`] = compose(half, quarter);
+  }
+
+  return table as Record<Rotation, Permutation>;
+})();
+
+/** Every face turn and rotation, so applying either is a single lookup. */
+export const TOKEN_PERMUTATIONS: Record<Token, Permutation> = {
+  ...MOVE_PERMUTATIONS,
+  ...ROTATION_PERMUTATIONS,
+};

@@ -1,4 +1,4 @@
-import { at, MOVE_PERMUTATIONS } from './permutations.js';
+import { at, MOVE_PERMUTATIONS, TOKEN_PERMUTATIONS } from './permutations.js';
 import {
   FACELET_COUNT,
   FACELETS_PER_FACE,
@@ -6,7 +6,11 @@ import {
   type CubeState,
   type Face,
   type Move,
+  type Token,
 } from './types.js';
+
+/** The centre is the middle sticker of the nine on each face. */
+const CENTRE_OFFSET = 4;
 
 /** A cube with every sticker on its home face. */
 export function createSolvedCube(): CubeState {
@@ -30,16 +34,48 @@ export function applyMoves(state: CubeState, moves: readonly Move[]): CubeState 
 }
 
 /**
- * True when every sticker is back on its home face.
+ * Apply a face turn or a whole-cube rotation, returning a new state.
  *
- * This compares against the solved state rather than checking centres, because a
- * cube can be solved but rotated as a whole — and for a timer that state is not
- * "solved". Whole-cube rotations are not part of the move set, so this cannot
- * produce a false negative here.
+ * A rotation moves centres, so the result may no longer have each centre at home.
+ * Code that asks "is this piece solved?" of such a state must compare against the
+ * centres, not the home labels. See ADR-0020.
+ */
+export function applyToken(state: CubeState, token: Token): CubeState {
+  const permutation = TOKEN_PERMUTATIONS[token];
+  return permutation.map((source) => at(state, source));
+}
+
+/** Apply a sequence of face turns and rotations in order, left to right. */
+export function applySequence(state: CubeState, tokens: readonly Token[]): CubeState {
+  return tokens.reduce<CubeState>(applyToken, state);
+}
+
+/**
+ * True when every sticker is back on its home face, *in the home orientation*.
+ *
+ * This compares against the solved state rather than checking centres, because a cube
+ * can be solved but rotated as a whole — and for a timer that state is not "solved".
+ * Only a whole-cube rotation can produce that state; for a question about whether the
+ * pieces are solved regardless of how the cube is held, use
+ * {@link isSolvedUpToRotation}.
  */
 export function isSolved(state: CubeState): boolean {
   const solved = createSolvedCube();
   return state.every((facelet, index) => facelet === at(solved, index));
+}
+
+/**
+ * True when every face is a single colour, however the cube is being held.
+ *
+ * Each face is judged against its own centre, which is the only reference that stays
+ * meaningful once rotations can move centres.
+ */
+export function isSolvedUpToRotation(state: CubeState): boolean {
+  return FACES.every((_, faceIndex) => {
+    const offset = faceIndex * FACELETS_PER_FACE;
+    const centre = at(state, offset + CENTRE_OFFSET);
+    return state.slice(offset, offset + FACELETS_PER_FACE).every((facelet) => facelet === centre);
+  });
 }
 
 /** Serialise to the 54-character facelet string used by cubing.js and by solvers. */

@@ -48,3 +48,4 @@ reversal destroys the only thing this directory is for.
 | [0015](0015-scramble-difficulty-label.md)               | Label scramble difficulty by optimal cross length         | Accepted                                                |
 | [0016](0016-cases-are-positions.md)                     | A last-layer case is a position, not an algorithm         | Accepted                                                |
 | [0017](0017-one-origin-in-production.md)                | The API serves the web client, from one origin            | Accepted                                                |
+| [0020](0020-whole-cube-rotations.md)                    | Whole-cube rotations are a separate kind of move          | Accepted                                                |

@@ -1969,3 +1969,54 @@ reports fine, which is right — it has a keyboard and its owner will use it.
 
 > "You can't ask whether there's a keyboard. You can ask whether the primary pointer is a
 > finger, which is the proxy the platform provides for exactly this."
+
+## Whole-cube rotations (solve coaching, part 1)
+
+### Why is a rotation not just another `Move`?
+
+Because `Move` already has a meaning that a great deal of code depends on: one of the 18 face
+turns. Tables are keyed by it (`Record<Move, …>` in the cross search and the edge reader),
+scrambles are stored as it, and the renderer reads the face to animate from its first letter
+with `move[0] as Face`. If `x` joined the union, the tables would have to grow entries they
+have no use for. Worse, `faceOf('x')` would still compile and would return `'x'` labelled as a
+face.
+
+A separate `Rotation` type, plus `Token = Move | Rotation` for the few places that need
+both, means the compiler proves that no scramble, stored algorithm or renderer call can ever
+contain a rotation. The type system is doing a job that tests could only sample.
+
+> "Widening the union would have compiled everywhere and been wrong in one place. Keeping it
+> separate means the compiler rules rotations out of every path that can't handle them."
+
+### What does the type system _not_ protect?
+
+The states that rotations produce. A rotated `CubeState` is still a `CubeState`, so nothing
+stops it being passed to the edge reader or the cross search. Those functions name pieces by
+their sticker labels and slots by position, so after a rotation they report facts that are
+true but easy to misread. For example, the piece labelled `D` might be sitting correctly on
+the face that is now on top.
+
+This is also why `isSolved` stays strict and `isSolvedUpToRotation` judges each face against
+its own centre. Once centres can move, the centre is the only reference that means anything.
+
+> "The type keeps rotations out of old code, but not rotated cubes. Anything that asks 'is
+> this piece home?' has to ask it relative to the centres."
+
+### How were the rotation tables built, and how do you know they're right?
+
+A quarter rotation is three layer turns done together: `x` is `R`, the middle layer, and
+`L'`. The face turns were already verified, so the only new hand-entered data is the middle
+layer: four strips of three stickers per axis, 36 numbers in all.
+
+Those numbers are checked in two independent ways. A test rebuilds each rotation by turning
+3D sticker coordinates and requires the result to match exactly. Conjugation identities such
+as `x U x' = F` require every rotation to relabel every face correctly.
+
+Every test passed first time, so each strip was deliberately reversed to see what caught it.
+The geometry test and the conjugation identities did. The structural tests (bijection, 52
+stickers moved, four quarter turns return to the start) did not, and neither did counting 24
+orientations.
+
+> "A reversed strip is still a perfectly good permutation. It turns the cube the right amount
+> and puts some stickers in the wrong place. Only a second derivation, or an identity that
+> involves two different faces, can tell."
