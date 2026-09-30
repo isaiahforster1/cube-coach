@@ -2590,3 +2590,34 @@ is no second copy of the state that could fall out of sync.
   test locks a bug in place, and what caught it here instead?
 - `STANDARD_COLOUR_NAMES` moved from the web app into the shared contract. Argue against
   that move, then say what would have to be true for your argument to win.
+
+## Designing the explanation agent (solve coaching, part 9)
+
+The design is in [ADR-0022](architecture/0022-step-explanation-agent.md), which is still
+Proposed. These questions are about the design, before any code exists. Answers are added
+here as they are worked out.
+
+### Questions to answer out loud, without notes
+
+- The port is one method: text in, text out. What did leaving out streaming, tools and
+  structured output buy, and which future feature would force you to widen it?
+- The prompt names colours ("green") instead of passing the facts' `Face` letters. The gate
+  would catch a stray `F` anyway. Why prevent it in the prompt as well, and what would the
+  refusal rate tell you if you didn't?
+- The adapter is given the key explicitly and ignores the SDK's own credential lookup. What
+  goes wrong on a developer's laptop if it doesn't?
+- The cache key is a hash of the built prompt, not the scramble. Give a case where two
+  different scrambles share an entry. What would have to change for that to be wrong?
+- Why are refused and failed replies not cached? What would caching a failure cost, and
+  what would not caching a refusal cost if the model refuses the same step every time?
+- `staleTime: Infinity` was justified by "the answer never changes". That is no longer
+  true, yet it stays. State the new justification, and the one case where it gives the
+  reader a worse answer.
+- A rate limit of 30 a minute per client does not bound spend. Explain why, and say which of
+  the three limits in §5 would stop a thousand addresses each sending 29 requests a minute.
+- Two API processes each hold their own cache and daily cap. What are the real cap and
+  hit rate then, and what is the smallest change that fixes both?
+- The gate checks notation, not meaning. Write a model reply that passes the gate and is
+  still wrong, and say how you would catch it without a second model.
+- One call per step costs more input tokens than one call per solve. Defend that choice
+  to someone who only cares about the bill.
