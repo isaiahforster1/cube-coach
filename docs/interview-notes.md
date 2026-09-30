@@ -2020,3 +2020,385 @@ orientations.
 > "A reversed strip is still a perfectly good permutation. It turns the cube the right amount
 > and puts some stickers in the wrong place. Only a second derivation, or an identity that
 > involves two different faces, can tell."
+
+## The step solver's timing prototype (solve coaching, part 2)
+
+### What is IDA\*, and why use it for an F2L pair instead of breadth-first search?
+
+Breadth-first search finds the shortest answer by visiting everything one move away, then
+everything two moves away, and so on. It has to remember every position it has seen, and
+with twelve moves available, the number of 9-move sequences runs into the billions.
+
+IDA\* is depth-first search run again and again with a rising move limit: try every
+sequence of up to 5 moves, then up to 6, and so on. Depth-first search only has to remember
+the current path, so memory stays tiny. The repetition sounds wasteful, but each new limit
+costs so much more than the previous one that re-doing the shallower ones barely matters.
+
+What makes it fast is the **lower bound**: a quick lookup that says "at least this many
+moves are still needed". Any branch where moves used so far plus the lower bound exceeds the
+limit is cut off without being explored.
+
+> "IDA\* is depth-first search with an increasing limit, so it uses almost no memory, and a
+> lower bound lets it skip every branch that provably can't finish within the limit."
+
+### Why is the lower bound the larger of two tables, and not their sum?
+
+Each table answers a smaller question exactly: how far the four cross edges are from solved,
+and how far this corner and edge are from solved. Solving the whole thing needs at least as
+many moves as either part, so the larger of the two is still a guarantee.
+
+Adding them would be wrong, because one move can help both at once. If the bound ever says
+more than the true distance, IDA\* skips the branch that holds the real shortest answer and
+returns a longer one, with no error.
+
+A bound that never overestimates is called **admissible**. The pair table is built with only
+the moves the search is allowed (`U R F L`), which makes its values larger, so it cuts off more,
+while staying admissible for this search.
+
+> "Each table is exact for part of the cube, so the larger of them never overestimates. The
+> sum could, and an overestimate makes IDA\* quietly return a non-optimal answer."
+
+### Why is the budget a 95th percentile instead of an average?
+
+An average hides the slow cases that people actually notice. In the prototype the median was
+under 7 ms, while the slowest solve took 130 ms, about twenty times longer. A mean of 11 ms
+describes neither.
+
+The 95th percentile says 19 of every 20 solves finish within the number. The report still
+shows the maximum, because a percentile target puts no limit on the worst case, and that is
+the number to watch.
+
+> "Search time has a long tail, so I set the budget on p95 and report the maximum next to it.
+> A mean would have hidden the solves people complain about."
+
+### Why is there a position cap as well as a depth limit?
+
+They guard against different failures. The depth limit says "an insert longer than 12 moves
+is not worth showing". The cap says "never let one request run for seconds". A search could
+stay within 12 moves and still visit tens of millions of positions if the lower bound is weak
+for that particular position.
+
+Both fail the step loudly, so neither can be mistaken for "no answer exists". The prototype
+reached neither limit in 3,000 solves. That is evidence the limits are set sensibly, not
+proof, which is why the solver logs every time one is hit.
+
+> "Depth limits the answer, the cap limits the work. Without the cap, one pathological
+> scramble can hang a request even though the answer it's looking for is short."
+
+### How does code that only knows the `D` cross handle a cross on another face?
+
+It relabels the cube. Rotate the scrambled cube so the chosen face is on the bottom, then
+rename every sticker after the centre it now matches. Centres end up back at their home
+labels, so the result is an ordinary position that face turns alone could reach. Every
+existing table and reader works on it unchanged.
+
+It is checked independently: for every face, the cross found on the relabelled cube has the
+same length as `crossDifficulty` gives for that face on the original scramble.
+
+> "A different cross face is a different view of the same cube, not different code. Relabel
+> once at the start, and the D-cross machinery handles all six."
+
+### The timing numbers were fine on the first run. How do you know they measure a working solver?
+
+Only because correctness was checked separately from the search. Every solve is replayed and
+judged on the 54 stickers against the centres. That check does not use the search's piece
+digits or tables. Then two bugs were introduced on purpose: leaving corners out of the goal
+test, and reversing corner twists. Each was caught.
+
+One lesson came out of this. The first time, the broken goal test was caught by the solver's
+own "failed" flag, not by the sticker check. The assertions were reordered so the independent
+check has to catch it, and it did.
+
+> "A fast wrong answer is worse than a slow right one. I checked every solve on the stickers,
+> which don't share code with the search, and broke the search on purpose to prove those
+> checks can fail."
+
+### Questions to answer out loud, without notes
+
+- The lower bound ignores the solved pairs the search must put back. Why is it still
+  admissible, and what does ignoring them cost? (The prototype measured the answer.)
+- Greedy chose the shortest insert every time, and the F2L still totalled 24 moves. Describe
+  a position where greedy is clearly worse than the best order.
+- The scrambles were random-move, not random-state. What could that do to these numbers, and
+  which direction would you expect them to move?
+- Opposite faces commute, so the search tries `R L` but never `L R`. Why is that safe, and
+  what would break if it also skipped `U` after `R`?
+- The cross table takes 90 ms to build and is cached per process. On a server that restarts
+  often, when does that start to matter, and what would you do?
+
+## The step solver's cross (solve coaching, part 3)
+
+### Why does `crossDistance` refuse a rotated cube instead of coping with it?
+
+The edge reader names slots by position. On a rotated cube it still finds every piece, but it
+reports them in the wrong slots, so the table lookup returns a real-looking number that is
+wrong. Nothing would crash. Checking the six centres first costs six comparisons and turns
+that silent error into a thrown one.
+
+The split itself is small: `crossDistance(state, face)` does the lookup, and
+`crossDifficulty(scramble, face)` became one line that applies the scramble and calls it. A
+property test checks the two agree, so the refactor provably changed no behaviour.
+
+> "The reader is only correct when centres are home, so I made that a checked precondition
+> rather than a comment. A wrong answer that looks right is the worst kind of bug."
+
+### How does a move the solver found become the move a person is shown?
+
+The solver only ever turns faces, so its cube always has its centres at home. How the person
+holds the cube is a `Frame`, worked out by rotating a solved cube and reading which centre
+ended up where. Turning the held face `h` turns whichever layer has its centre on `h`. So a
+fixed-frame `U'` for a `U` cross, held with `z2`, is shown as `D'`: the `U` centre is now on the
+bottom. The turn direction never changes, because a rotation is never a mirror image.
+
+The test for this is the identity in ADR-0021 §5: perform the shown tokens on a real cube,
+undo the rotations, and the result must equal the fixed-frame moves applied directly. It runs
+over random scrambles, random frames of up to four rotations, and random move lists, and it
+compares all 54 stickers.
+
+> "The solver reasons in one frame and speaks in another. The translation is a relabelling
+> read off verified tables, and I check it by doing both and comparing the whole cube."
+
+### Why search for the setup rotation instead of writing a six-entry table?
+
+The spike had exactly that table. It was right, but a table is where a typo hides. The
+search tries every sequence of up to two rotations (the test proves that reaches all 24
+orientations), keeps the ones that put the chosen face on the bottom, and prefers the one that
+keeps the front centre in front. That rule is why a `U` cross gets `z2`, not `x2`. The table
+would have encoded the same decision without saying why.
+
+> "The rule is written down as code, so the answer can't disagree with the reason."
+
+### How are ties between optimal moves broken, and what is the honest limit?
+
+At each point the solver takes, of all moves that lower the distance by one, the one that is
+cheapest as held: `R U F L`, then `D`, then `B`. The cost is measured after translation,
+because on an `F` cross, held with `x'`, the fixed `B` face is on top and is performed as
+`U`. Order within the cheap group is an
+arbitrary fixed choice, only there so the same scramble always gets the same cross.
+
+This is greedy, one move at a time. It is not the cheapest of all optimal crosses: an
+expensive first move could open up a cheaper remainder. Finding the true cheapest would need a
+search over every optimal path, remembered per position so it does not blow up. That is worth
+doing only if the crosses shown turn out to be awkward in practice.
+
+> "Every cross is optimal in length. Ergonomics only breaks ties, and it's greedy. I know
+> what the fully correct version would cost and I chose not to pay it yet."
+
+### Why does the oracle check the side stickers, and why only the bottom?
+
+Four bottom-coloured stickers in a plus shape can still be a wrong cross, with two edges
+swapped. Each edge's side sticker must also match its side centre.
+
+It judges only the cross on the bottom as held, not "a cross somewhere". That makes it check
+the setup rotation too: if the rotation were wrong, the cross would be solved but somewhere
+else, and the oracle would reject it. The test adds that the bottom centre is the colour asked
+for. The oracle imports nothing from `analysis/` or from the solver.
+
+### The mutation check failed on its first run. Was the solver wrong?
+
+No, the claim was. The first version said "whenever a mutation changes the shown tokens, the
+oracle must reject them". Swapping `R` and `L` turns `R L` into `L R`, which is a different
+string and the same move, because opposite faces commute. `F' B'` under `x2` instead of `z2`
+is the same case. The oracle was right to accept both.
+
+The claim is now about effects. The oracle may accept a mutated answer only if it moves every
+piece exactly as the correct answer does (compared after undoing each answer's own rotation,
+since `x2` and `z2` leave the cube held differently). Over 600 solves it rejected the inverted
+frame 399 times, the `R`/`L` swap 571 times, and `x2` shown with `z2` used 99 times out of the
+100 `U` crosses. The inverted frame is never caught on `U` or `D`, and should not be: `z2` is
+its own inverse, so that mutation changes nothing there.
+
+A test of the oracle itself was also wrong at first. It rotated a solved cube with `x` and
+expected "no cross on the bottom". But a solved cube has all six crosses solved. The fix was
+to break the other crosses with `U` first.
+
+> "When a check fails, first ask whether the claim was true. Comparing strings instead of
+> effects made a correct result look like a bug."
+
+### Questions to answer out loud, without notes
+
+- `crossDistance` checks centres but not that the state is a legal cube. What input could
+  still get a wrong answer out of it, and where should that be caught?
+- Give a scramble position where the greedy tie-break produces a more awkward cross than the
+  best optimal one. How would memoising cost-to-go per table index fix it, and what does that
+  cost?
+- The inverted-frame mutation can't be caught on a `U` cross. Is that a gap in the oracle or
+  in the mutation? Design a mutation that would be caught on every face.
+- Why is it safe for `toHeld` to keep the turn suffix unchanged? What kind of transformation
+  would make that wrong?
+- The oracle and the solver both use the permutation tables. Given that, in what sense are
+  they independent, and what bug could they still share?
+
+## The step solver's F2L (solve coaching, part 4)
+
+### The spike relabelled the cube to make every cross a `D` cross. Why doesn't the solver?
+
+Relabelling rewrites the stickers so another face looks like `D`, then every answer has to be
+translated back through that relabelling as well as through the grip. That makes two
+translations, and the second one is exactly the kind of silent relabelling ADR-0021 was
+written to avoid. The solver instead searches the real scrambled state with the cross face
+the `CrossStep` chose. The only things that depend on the face are data: which four slots
+exist (`slotsFor`, derived from the corner and edge tables), which cross table bounds the
+search, and which two faces the move set leaves out. The code path is the same for all six.
+
+> "The cross face is an input to the data, not a branch in the code. There's one
+> translation, from fixed to held, and it's the one the cross already tested."
+
+### How does "choose the `y` for each slot" work without a table?
+
+With the cross on the bottom, the four `y` turns carry any slot round all four sides. For each
+candidate (`nothing`, `y`, `y'`, `y2`, in that order) the solver builds the frame and asks
+whether the slot's two side colours are now held at front and right. Exactly one works. The
+frame then fixes the move set: every fixed face except the ones held at the bottom and the
+back. That is how "`U R F L` as held" becomes a different set of fixed faces for each slot.
+
+### Why are there 96 pair tables now instead of 16?
+
+A pair table gives the distance to solve one pair using only the allowed moves. Which moves are
+allowed depends on two faces: the cross face (never turned) and the held back (left out so
+there's no `B`). Six cross faces × four possible backs × four pairs is 96 tables of 576 bytes.
+They are built on demand, 39 ms for all of them. The key is those two excluded faces and the
+pair's pieces, which is precisely what the table depends on.
+
+> "Cache on what the result depends on, nothing more and nothing less."
+
+### Why does the pair table use the restricted moves, when the cross table uses all 18?
+
+Both have to be admissible: never more than the real number of moves left. A distance using
+all 18 moves can only be shorter than one using a subset, so the cross table is a safe
+underestimate for a search restricted to `U R F L`. The pair table built with the restricted
+set is also admissible and is tighter, so it prunes more. Either would give the same answers.
+The tighter one gives them faster.
+
+### The first version met the budget but was nearly three times slower per position than the spike. Why?
+
+It visited exactly the same positions, so the search was fine. The cost was per position. Two
+causes, both in the inner loop:
+
+- `byte()`, the bounds-checked read, is a function call and a branch on every table read.
+- The digit tables moved into their own module and were imported. Vitest compiles an imported
+  name into a property read on a module object each time it is used. The spike had its tables
+  in the same file, so it never paid this.
+
+Copying the tables into local constants and reading them directly took 155 ns per position to
+37 ns. The bounds check is still used where it's cheap, when tables are built. In the inner
+loop the indices are safe because every digit is below 24, and a test checks the digit tables
+against the sticker model for every move.
+
+> "When the work is the same and the time isn't, profile the cost per unit of work before
+> touching the algorithm."
+
+### How do you know the tests would catch a broken solver, not just a broken translation?
+
+The mutation check covers translation. Four mutations each got through on none of the 180
+solves: the `y` shown but not translated, the `y` translated but not shown, the `y` shown
+backwards, and `R` and `L` swapped. The solver itself was broken three ways, one at a time,
+and each was caught on all six faces:
+
+- The goal forgets already-solved pairs. The sticker oracle rejects the finished F2L, and the
+  "keeps every earlier step intact" property fails.
+- The move set allows held `B`. The "no `B` or `D` as held" property fails.
+- The chooser takes the longest insert. The re-derived "shortest was chosen" property fails.
+
+### Questions to answer out loud, without notes
+
+- IDA\* re-searches the shallow levels on every iteration. Why is that acceptable here, and
+  what fraction of the work is repeated?
+- The lower bound is `max(cross, pair)`. Why not `cross + pair`? Give a move that improves
+  both at once.
+- Greedy pair choice picks the shortest insert now. Sketch a scramble where that makes the
+  whole F2L longer, and say what the coaching explanation would lose if the solver looked
+  ahead instead.
+- An insert that solves its own pair can accidentally solve another one. Where does that pair
+  go in the result, and why must it be added to the preserved set straight away?
+- The search tracks only the cross edges and the solved pairs. Why is it correct to ignore
+  every other piece, and what would go wrong if an unsolved pair's pieces were tracked too?
+- The timing test is skipped by default. What stops the solver getting slow without anyone
+  noticing, and what would you add to CI to catch it?
+
+## The step solver's facts (solve coaching, part 5)
+
+### Why are held positions words like `'front'` and not letters like `'F'`?
+
+TypeScript compares types by shape, not by name. If a held position were `'U' | 'R' | 'F' | …`
+it would be exactly the `Face` type, and a colour could be passed where a place was meant
+without any error. The ADR's main risk is an explanation that is true but told in the wrong
+grip, so the two had to be types that cannot be swapped. As words, they can't. `held.test.ts`
+proves it with `@ts-expect-error` in both directions, and the typecheck fails if either
+assignment ever starts compiling. The one place they meet is `NOTATION_LETTER`, because
+notation is positional: `R` means "whatever is on the right".
+
+> "If two things must never be confused, make them different types, not just different names."
+
+### Why re-key `Frame` too, when the ADR only asked for it in facts?
+
+Facts are built from the frame. If `Frame.heldPositionOf` still returned a `Face`, every fact
+builder would have to convert at the edge, and a missed conversion would compile. Keying the
+frame on `HeldPosition` moves the boundary to the one place positions are created. The cost
+was mechanical edits in `cross.ts`, `f2l.ts` and their tests, and no behaviour changed. The
+same 110 tests passed before and after.
+
+### Which grip is each fact told in, and why not one grip for all?
+
+Each fact uses the grip the person is in at that moment of the step. They choose the pair
+before turning the cube, so `pair-choice` uses the grip before the `y`. In that grip the
+chosen slot could be anywhere. In the grip after it, the slot is always front right, which
+explains nothing. They look for the pieces and perform the moves after the `y`, so
+`pair-located`, `preserved` and `also-solved` use that grip. The mutation check builds each
+of these in the other grip and confirms the re-derivation disagrees on every step that has a
+rotation.
+
+### How are the facts checked without repeating the engine's reasoning?
+
+The engine reads the unrotated state with the piece readers and translates positions through
+the frame. The test does neither. It performs the presented tokens on a real cube, rotations
+included. It then reads each sticker's facing from the block it is in and its colour from its
+label, using sticker groups of its own. The corner groups also need a clockwise order for
+twist. That order is anchored at one corner by geometry, and the other seven are proved by
+the moves: every face turn is a rigid rotation, so it must carry each listed corner onto
+another listed corner in the same cyclic order.
+
+### Why does `pair-joined` count the join that lasts, not the first one?
+
+The fact exists to split a step into "set up and join" and "insert". If a pair were joined,
+split and rejoined, the split belongs to the setup, and "first" would count it as part of the
+insert. In practice no shortest insert did this: not in 717 steps across 180 solves, and not
+in 36,000 random `R U` scrambles searched for one. The likely reason is that a correctly
+joined block can always go in whole after a `U` adjustment. A cross-colour-up corner never
+counts as joined, because its edge has no cross-colour sticker to match. That is a conjecture
+with evidence, not a proof. So the definition that is right either way was kept, and a
+hand-built move list (`R R' R U R'` after `R U' R'`) checks the difference.
+
+> "When your data never exercises a branch, build the case by hand. Don't delete the branch."
+
+### How do you know these tests would catch a wrong fact?
+
+Six bugs were planted in the engine, one at a time, and five were caught straight away:
+corner twist reversed, cross edges timed by first solve instead of final solve, edge `fit`
+mislabelled, cross sides named in the scramble grip, and `also-solved` dropped. The sixth
+(first join instead of lasting join) got through, which is what led to the finding above and
+the hand-built test that now catches it.
+
+### What is the honest limit of `pair-choice`?
+
+The test proves each claimed insert length is a real insert: performed on the cube, it solves
+that pair and keeps everything else. So the chosen insert really is no longer than the
+alternatives the engine found. It does not independently prove that no shorter insert
+exists for the other slots. That rests on IDA\* with an admissible lower bound, which the
+F2L tests cover. Re-proving optimality by brute force would take seconds per step.
+
+### Questions to answer out loud, without notes
+
+- A `HeldPosition` and a `Face` are both strings. Explain structural typing, and name one
+  other way to get the same safety, such as a branded type, with its trade-off.
+- `pair-choice` is told before the rotation and `pair-located` after it. Walk through
+  `L' U L` and say what each fact would claim if the grips were swapped.
+- The corner twist is `(cross − vertical) mod 3` over a clockwise sticker order. Why does
+  that order survive translation to held positions, and what kind of transformation would
+  break it?
+- The chirality test would still pass if all eight corners were listed anticlockwise. What
+  stops that, and why can't the move check alone catch it?
+- `crossFacts` and the test both say "solved for good". Give a cross where an edge is solved,
+  knocked out, then solved again, and say what each definition would report.
+- Facts add about 0.5 ms per solve. Where does that time go, and when would you compute facts
+  lazily instead?

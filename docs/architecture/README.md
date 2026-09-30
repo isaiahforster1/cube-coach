@@ -49,3 +49,4 @@ reversal destroys the only thing this directory is for.
 | [0016](0016-cases-are-positions.md)                     | A last-layer case is a position, not an algorithm         | Accepted                                                |
 | [0017](0017-one-origin-in-production.md)                | The API serves the web client, from one origin            | Accepted                                                |
 | [0020](0020-whole-cube-rotations.md)                    | Whole-cube rotations are a separate kind of move          | Accepted                                                |
+| [0021](0021-step-solver.md)                             | The step solver searches in a fixed frame                 | Accepted                                                |
