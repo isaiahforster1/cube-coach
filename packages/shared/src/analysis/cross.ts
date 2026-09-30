@@ -1,6 +1,13 @@
 import { applyMoves, createSolvedCube } from '../cube/cube.js';
 import { at } from '../cube/permutations.js';
-import { FACES, TURNS, type Face, type Move } from '../cube/types.js';
+import {
+  FACELETS_PER_FACE,
+  FACES,
+  TURNS,
+  type CubeState,
+  type Face,
+  type Move,
+} from '../cube/types.js';
 import { EDGE_MOVES, EDGE_SLOTS, readEdges } from './edges.js';
 
 /**
@@ -18,8 +25,12 @@ import { EDGE_MOVES, EDGE_SLOTS, readEdges } from './edges.js';
 
 const ALL_MOVES: Move[] = FACES.flatMap((face) => TURNS.map((turn) => `${face}${turn}` as Move));
 
-/** The four edge slots that make up the cross on a given face. */
-function crossSlotsFor(face: Face): number[] {
+/**
+ * The four edge slots that make up the cross on a given face, in the order
+ * {@link encodeCross} packs them. Exported so the F2L search (ADR-0021 §4) can index the
+ * cross table directly without deriving the order a second time.
+ */
+export function crossSlotsFor(face: Face): number[] {
   return EDGE_SLOTS.map((slot, index) => ({ slot, index }))
     .filter(({ slot }) => slot.name.includes(face))
     .map(({ index }) => index);
@@ -37,7 +48,7 @@ const RADIX = 24;
 const TABLE_SIZE = RADIX ** 4;
 const UNVISITED = 255;
 
-function encode(slots: readonly number[], orientations: readonly number[]): number {
+export function encodeCross(slots: readonly number[], orientations: readonly number[]): number {
   let index = 0;
   for (let piece = 3; piece >= 0; piece -= 1) {
     index = index * RADIX + (at(slots, piece) * 2 + at(orientations, piece));
@@ -82,15 +93,18 @@ const DIGIT_MAPS: Record<Move, Uint8Array> = (() => {
  *
  * Built lazily per face and cached, because computing all six up front would cost time
  * for questions nobody has asked.
+ *
+ * Exported, with {@link encodeCross}, because the step solver (ADR-0021) walks down
+ * this table for the cross and uses it as a lower bound in the F2L search.
  */
 const distanceTables = new Map<Face, Uint8Array>();
 
-function distanceTableFor(face: Face): Uint8Array {
+export function crossDistanceTable(face: Face): Uint8Array {
   const cached = distanceTables.get(face);
   if (cached !== undefined) return cached;
 
   const table = new Uint8Array(TABLE_SIZE).fill(UNVISITED);
-  const start = encode(crossSlotsFor(face), [0, 0, 0, 0]);
+  const start = encodeCross(crossSlotsFor(face), [0, 0, 0, 0]);
   table[start] = 0;
 
   const queue = new Int32Array(TABLE_SIZE);
@@ -128,14 +142,25 @@ function distanceTableFor(face: Face): Uint8Array {
   return table;
 }
 
+/** Where each centre sits in a state reached by face turns alone. */
+const CENTRES = FACES.map((face, index) => ({ face, facelet: index * FACELETS_PER_FACE + 4 }));
+
 /**
- * The minimum number of moves to solve the cross on `face` after `scramble`.
+ * The minimum number of moves to solve the cross on `face`, from any position.
  *
- * Returns 0 when the cross is already solved, which happens occasionally and is itself
- * worth noticing.
+ * The state must have every centre at home, meaning it was reached by face turns alone.
+ * The edge reader names slots by position, so on a rotated cube it would read the right
+ * pieces in the wrong places and return a wrong distance without failing. Checking the
+ * six centres turns that silent error into a thrown one. See ADR-0021 §1.
  */
-export function crossDifficulty(scramble: readonly Move[], face: Face): number {
-  const placements = readEdges(applyMoves(createSolvedCube(), scramble));
+export function crossDistance(state: CubeState, face: Face): number {
+  for (const centre of CENTRES) {
+    if (at(state, centre.facelet) !== centre.face) {
+      throw new Error('crossDistance needs every centre at home; undo any rotation first');
+    }
+  }
+
+  const placements = readEdges(state);
 
   // Where each cross piece currently sits, and which way round it is.
   const slots = crossSlotsFor(face).map((home) =>
@@ -143,12 +168,22 @@ export function crossDifficulty(scramble: readonly Move[], face: Face): number {
   );
   const orientations = slots.map((slot) => at(placements, slot).orientation);
 
-  const distance = distanceTableFor(face)[encode(slots, orientations)];
+  const distance = crossDistanceTable(face)[encodeCross(slots, orientations)];
   if (distance === undefined || distance === UNVISITED) {
     throw new Error('Reached a cross arrangement the search never found, which is impossible');
   }
 
   return distance;
+}
+
+/**
+ * The minimum number of moves to solve the cross on `face` after `scramble`.
+ *
+ * Returns 0 when the cross is already solved, which happens occasionally and is itself
+ * worth noticing.
+ */
+export function crossDifficulty(scramble: readonly Move[], face: Face): number {
+  return crossDistance(applyMoves(createSolvedCube(), scramble), face);
 }
 
 /**
