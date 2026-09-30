@@ -2402,3 +2402,85 @@ F2L tests cover. Re-proving optimality by brute force would take seconds per ste
   knocked out, then solved again, and say what each definition would report.
 - Facts add about 0.5 ms per solve. Where does that time go, and when would you compute facts
   lazily instead?
+
+## The step solver's explanations (solve coaching, part 6)
+
+### Why is there a template at all, if a model will write the explanation?
+
+Three reasons, and each one alone would justify it. The feature has to work with no model
+configured, so the template is the product in that case, not a stub. A refused model text
+needs something to fall back to, or the step would show nothing. And the template is the
+reference for what an explanation is allowed to say: it restates facts and nothing else,
+so if a model's text says more than the template could, that is a sign it is guessing.
+
+### Why does the template take colour names as a parameter?
+
+The engine labels stickers by face (`'D'`), not by colour, so that the colour scheme lives
+only in the interface (`apps/web/src/features/cube/colours.ts`). A cuber with a Japanese
+scheme cube, or a colour-blind palette, changes that file and nothing else. If the
+template hard-coded "yellow", the engine would have a colour scheme again.
+
+### What exactly does the notation gate check, and what doesn't it check?
+
+It finds every piece of move notation in the text and requires each one to be exactly one
+of that step's tokens. It does **not** check numbers ("7 moves"), colours, or claims in
+words ("the edge is flipped"). Those rest on the model receiving only the facts, and on the
+prompt. The gate is narrow on purpose: notation is the one thing that can be checked
+mechanically and exactly, and a wrong move is the most damaging mistake, because the
+person will perform it.
+
+### Why does the gate look for moves the engine can't even perform, like `r` and `M`?
+
+Because the gate asks "does this text name a move?", not "does it name a move we know?". A
+model that writes `r U r'` has named a move the step does not contain. If the gate only
+recognised the 18 face turns and the rotations, it would skip `r` as an ordinary letter and
+let the text through.
+
+### Why can uppercase turns run together but lowercase can't?
+
+`RUR'` is a common way to write moves, and almost no English word is spelled in capitals
+from only U R F D L B M E S. Lowercase is different: "by" is `b` then `y`, and "fly" is
+`f l y`, all valid lowercase turns. Treating lowercase runs as notation would refuse almost
+every text. So lowercase counts only as a word on its own.
+
+### Which way does the gate fail, and why is that the right way?
+
+It prefers refusing to missing. `RED` in capitals reads as `R E D` and is refused. The cost
+is that the template is shown, which is correct but plainer. Missing a wrong move costs the
+person a wrong turn and the product its trust. Two misses are known and documented: a move
+inside single quotes (`'R'` reads as `R'`, because the closing quote looks like a prime) and
+a possessive (`R's`). They are accepted because the prompt will ask for plain notation, and
+fixing them properly means guessing which apostrophes are primes.
+
+> "When a check can only be wrong one way, choose which way, and write down the other."
+
+### How do you know the gate protects against the mistake it exists for?
+
+The mistake ADR-0020 worried about is a move that is true of the cube but wrong for the
+person holding it: the solver's fixed-frame move instead of the presented one. The test
+offers the fixed-frame moves as if they were a model's text. Of the 554 real steps where
+the two differ, 550 are refused. The other four are relabellings where every fixed move
+happens to be another move the step also contains, which the gate cannot tell apart and
+should not try to.
+
+### How do you know the template itself can't be refused?
+
+Over 120 real solves on all six cross faces, every step's template goes through the same
+gate. A planted bug that printed the inverse of the rotation (`y` for `y'`) failed that
+test and the worked example.
+
+### Questions to answer out loud, without notes
+
+- The gate passes text that says "this takes 5 moves" when the step takes 7. Why is that not
+  the gate's job, and whose job is it?
+- `checkNotation` matches tokens exactly, so `R` does not stand for `R'`. Give a sentence a
+  good model might write that this refuses, and argue whether refusing it is right.
+- Why is it safe for the template to name the rotation, but not safe for it to name a face
+  letter as a colour?
+- Four fixed-frame steps pass the gate. Construct a two-move example of how a relabelling
+  can land on moves the step already contains.
+- `chooseExplanation` treats blank model text as "no model". What would go wrong if it
+  showed blank text instead, and what would go wrong if it treated it as refused?
+- The gate is a denylist of everything notation-shaped not in the tokens. Compare it with
+  an allowlist approach, such as asking the model for structured output that references
+  tokens by index. What does each cost?

@@ -4,6 +4,16 @@
  */
 export { solveCross, type CrossStep } from './cross.js';
 export {
+  checkNotation,
+  chooseExplanation,
+  notationIn,
+  templateExplanation,
+  type ColourNames,
+  type ExplainableStep,
+  type Explanation,
+  type NotationCheck,
+} from './explain.js';
+export {
   factOf,
   type AlsoSolvedFact,
   type CornerLocation,

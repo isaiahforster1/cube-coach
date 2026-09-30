@@ -310,6 +310,30 @@ step 3 gave a median of 4.0 ms, p95 14.0 ms, p99 21.9 ms and max 38.3 ms, agains
 3.5, 12.1, 19.4 and 34.6 ms without facts. Search statistics and solution lengths are
 unchanged, and no solve failed. The budget is still met about fourteen times over at p95.
 
+### The template and the notation gate (step 5)
+
+`solver/explain.ts` holds both halves of the last paragraph of §6.
+
+- **The template** writes one or two sentences per fact, in the step's fact order, and
+  adds no reasoning of its own. Colour names are passed in, so the colour scheme stays in
+  the interface. It does not mention the cross's setup rotation, because no fact carries
+  it; the tokens are shown beside the text.
+- **The gate** finds every piece of notation in the text and refuses the text if any piece
+  is not exactly one of the step's tokens. It looks for more than the engine performs
+  (wide turns, slices, `R3`), so a model that writes `r` or `M` is caught rather than
+  ignored. Uppercase turns count even when run together (`RUR'`). Lowercase counts only as
+  a word on its own, because "by" and "fly" are spelled from turn letters. `F2L` is
+  exempt by name.
+- **Which way it fails.** When in doubt it refuses: an all-caps word such as `RED` reads as
+  notation. Two cases it misses are known: a move written inside single quotes (`'R'`
+  reads as `R'`), and a possessive (`R's`). The prompt will ask for plain notation. The
+  cost of a false refusal is only that the template is shown.
+- **Checked.** Over 120 solves on all six cross faces, the template never fails the gate.
+  The solver's fixed-frame moves, offered in place of the presented ones, are refused on
+  550 of the 554 steps where the two differ. The other four are relabellings that happen
+  to land only on moves the step also contains. A planted bug that inverted the printed rotation was caught by both the worked
+  example and the property.
+
 ## Alternatives considered
 
 **Rotated state, judged against centres.** This is option 1 above. Every predicate would
