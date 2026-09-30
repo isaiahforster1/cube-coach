@@ -1,12 +1,17 @@
 import { AXES, FACES, TURNS, type Move, type Rotation, type Token } from './types.js';
 
-/** Thrown when a string is not valid move notation. Carries the offending token. */
+/**
+ * Thrown when a string is not valid move notation. Carries the offending token.
+ *
+ * `index` is zero-based, for code. The message counts from one, because it is shown to
+ * people, and "move 1" should mean the first move.
+ */
 export class InvalidNotationError extends Error {
   constructor(
     readonly token: string,
-    readonly position: number,
+    readonly index: number,
   ) {
-    super(`Invalid move '${token}' at position ${position}`);
+    super(`Invalid move '${token}' at move ${index + 1}`);
     this.name = 'InvalidNotationError';
   }
 }

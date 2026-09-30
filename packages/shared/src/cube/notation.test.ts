@@ -42,8 +42,9 @@ describe('parseAlgorithm', () => {
     expect(() => parseAlgorithm('R3')).toThrow(InvalidNotationError);
   });
 
-  it('reports which token failed and where', () => {
-    expect(() => parseAlgorithm('R U Q2 F')).toThrow(/Invalid move 'Q2' at position 2/u);
+  it('reports which token failed, counting moves from one for people and zero for code', () => {
+    expect(() => parseAlgorithm('R U Q2 F')).toThrow(/Invalid move 'Q2' at move 3$/u);
+    expect(() => parseAlgorithm('R U Q2 F')).toThrow(expect.objectContaining({ index: 2 }));
   });
 });
 
@@ -113,7 +114,7 @@ describe('parseSequence', () => {
 
 describe('parseAlgorithm and rotations', () => {
   it('rejects a rotation, because scrambles and stored algorithms may not contain one', () => {
-    expect(() => parseAlgorithm("y R U R'")).toThrow(/Invalid move 'y' at position 0/u);
+    expect(() => parseAlgorithm("y R U R'")).toThrow(/Invalid move 'y' at move 1$/u);
   });
 });
 
