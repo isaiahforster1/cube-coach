@@ -195,9 +195,12 @@ function preservedSentences(fact: PreservedFact, names: ColourNames): string[] {
   return [`${noun} already solved ${verb} solved: ${slotList(fact.slots, names)}.`];
 }
 
+/** `the green–orange pair at back left and the blue–red pair at back right`. */
 function alsoSolvedSentences(fact: AlsoSolvedFact, names: ColourNames): string[] {
-  const noun = fact.slots.length === 1 ? 'pair' : 'pairs';
-  return [`This also solves the ${slotList(fact.slots, names)} ${noun}.`];
+  const pairs = fact.slots.map(
+    (slot) => `the ${pairName(slot, names)} pair at ${slotWords(slot.held)}`,
+  );
+  return [`This also solves ${list(pairs)}.`];
 }
 
 // ─── The template ────────────────────────────────────────────────────────────────────
