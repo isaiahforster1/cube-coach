@@ -2484,3 +2484,44 @@ test and the worked example.
 - The gate is a denylist of everything notation-shaped not in the tokens. Compare it with
   an allowlist approach, such as asking the model for structured output that references
   tokens by index. What does each cost?
+
+## Committing the solver in pieces (solve coaching, part 7)
+
+### Why five commits and not one, or one per step?
+
+One commit of 4,000 lines cannot be reviewed or bisected. One commit per step would mean
+inventing files that never existed, because `solver/cross.ts` imports `crossFacts` from
+`solver/facts.ts`, which was written in step 4. A cross-only commit would need a
+hand-edited `cross.ts` without facts. That is a version nobody ran, so it is fake history.
+The split follows the dependency graph as it is now. Rotations come first because nothing
+depends on the solver. Next is the `crossDistance` refactor, which only needs the cube.
+Then held positions, the frame and the oracle, which only need rotations. Then cross,
+F2L and facts together, because they depend on each other. Last is the template and the
+gate, which nothing else imports.
+
+### What does "each commit builds" mean, and how was it checked?
+
+For each commit, a clean checkout typechecks `packages/shared` and `apps/web` and passes the
+shared tests. This was run in a separate worktree, so the uncommitted files in the working
+copy could not hide a missing file. It matters for `git bisect`. A commit that does not
+build can't tell you whether it introduced a bug, so it breaks the search.
+
+### How can one file be split across commits without an interactive `git add -p`?
+
+Write the version of the file you want in this commit, store it as a blob with
+`git hash-object -w`, and point the index at it with
+`git update-index --cacheinfo 100644,<blob>,<path>`. The working copy is untouched. The
+notes, ADR-0021, the ADR index and `solver/index.ts` were split this way, because each
+grew section by section.
+
+### Questions to answer out loud, without notes
+
+- `cross.ts` depends on `facts.ts`, and `facts.ts` imports types from `f2l.ts`, which
+  imports `cross.ts`. Is that a cycle at runtime, at type level, or both? Why does it
+  still work?
+- If you wanted cross and facts in separate commits next time, what would you change in
+  the code, not the history?
+- `solver/try.test.ts` was left uncommitted. What makes a file worth committing even
+  though it only prints output?
+- Why run the per-commit checks in a separate worktree rather than stashing the rest of
+  the working copy?
