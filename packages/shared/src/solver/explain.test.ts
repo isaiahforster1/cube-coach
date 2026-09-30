@@ -131,8 +131,21 @@ describe('the template for a pair', () => {
       "After y': The corner is in the top layer, above front left, with yellow facing to the front.",
       'The edge is in the top layer on the back, with blue on top.',
       'The first 3 moves join the corner and edge, and the last 4 moves insert the pair.',
-      'The pair already solved stay solved: green–red at front left.',
+      'The pair already solved stays solved: green–red at front left.',
       'This also solves the green–orange at back left pair.',
+    ]);
+  });
+
+  it('agrees the verb with the number of pairs kept', () => {
+    const two: StepFact = {
+      kind: 'preserved',
+      slots: [
+        { colours: ['F', 'R'], held: 'front-left' },
+        { colours: ['F', 'L'], held: 'back-left' },
+      ],
+    };
+    expect(lines([], [two])).toEqual([
+      'The pairs already solved stay solved: green–red at front left and green–orange at back left.',
     ]);
   });
 

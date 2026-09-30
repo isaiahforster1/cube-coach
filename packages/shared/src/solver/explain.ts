@@ -191,8 +191,8 @@ function slotList(slots: readonly SlotRef[], names: ColourNames): string {
 
 function preservedSentences(fact: PreservedFact, names: ColourNames): string[] {
   if (fact.slots.length === 0) return [];
-  const noun = fact.slots.length === 1 ? 'The pair' : 'The pairs';
-  return [`${noun} already solved stay solved: ${slotList(fact.slots, names)}.`];
+  const [noun, verb] = fact.slots.length === 1 ? ['The pair', 'stays'] : ['The pairs', 'stay'];
+  return [`${noun} already solved ${verb} solved: ${slotList(fact.slots, names)}.`];
 }
 
 function alsoSolvedSentences(fact: AlsoSolvedFact, names: ColourNames): string[] {
