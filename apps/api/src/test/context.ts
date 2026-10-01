@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
+import type { TextModel } from '../ai/text-model.js';
 import { buildApp } from '../app.js';
 import { loadConfig } from '../config.js';
 import { createPrismaClient } from '../db.js';
@@ -23,6 +24,11 @@ export interface CreateTestContextOptions {
   readonly webRoot?: string;
   /** Run as production would, for the headers that only appear there. */
   readonly production?: boolean;
+  /**
+   * The explanation model. `null` by default, never the one from config: these tests load
+   * the developer's `.env`, which may hold a real key, and a test must not spend its quota.
+   */
+  readonly textModel?: TextModel | null;
 }
 
 /**
@@ -60,6 +66,7 @@ export async function createTestContext(
       solverMax: options.rateLimit?.solverMax ?? 100_000,
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
+    textModel: options.textModel ?? null,
   });
   await app.ready();
 
