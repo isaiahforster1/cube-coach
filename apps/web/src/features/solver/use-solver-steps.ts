@@ -20,7 +20,10 @@ export interface SolverRequest {
  * a key the browser must never hold, and the notation gate has to run where the model's
  * text arrives, before anything is shown.
  *
- * The answer never changes for the same question, so it is cached for the session.
+ * Cached for the session (ADR-0022 §5). A model's wording can differ between calls, but
+ * the text should not change while someone is reading it, and fetching again would spend
+ * the model's quota for nothing. The cost: if the first answer fell back to the template,
+ * this tab keeps the template until it is reloaded.
  */
 export function useSolverSteps(request: SolverRequest | null) {
   const scramble = request === null ? '' : formatAlgorithm(request.scramble);

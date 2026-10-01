@@ -2727,8 +2727,8 @@ They have not been explained back yet.
    server cache usually returns the same text. The worse case: if the first request fell
    back to the template (timeout, failure or cap), that tab keeps the template for the
    rest of the session, even after the model recovers. The comment in
-   `apps/web/src/features/solver/use-solver-steps.ts` still gives the old reason ("the
-   answer never changes") and should be updated.
+   `apps/web/src/features/solver/use-solver-steps.ts` gave the old reason ("the answer
+   never changes") until it was updated to this one.
 7. **A per-client limit does not bound spend.** It limits each address, not their sum: a
    thousand addresses at 29 a minute are each under 30, together 29,000 requests a
    minute, and each new scramble is about five model calls. The global daily cap stops
