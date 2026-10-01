@@ -330,9 +330,10 @@ interface Reader {
   readonly mismatches: FactMismatch[];
 }
 
-function report(reader: Reader, claim: ClaimKind, said: string, allowed: readonly string[]) {
+function report(reader: Reader, claim: ClaimKind, words: string, allowed: readonly string[]) {
+  const said = words.trim();
   const duplicate = reader.mismatches.some((m) => m.claim === claim && m.said === said);
-  if (!duplicate) reader.mismatches.push({ claim, said: said.trim(), allowed });
+  if (!duplicate) reader.mismatches.push({ claim, said, allowed });
 }
 
 const sorted = <T>(values: Iterable<T>) => [...values].sort();

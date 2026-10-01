@@ -17,8 +17,9 @@ import {
  * The step explanation agent (ADR-0022 §1).
  *
  * Everything specific to explaining steps lives here: the prompt, the gate and the fact
- * check (ADR-0023), the cache, the daily cap and the logs. The model behind it is a `TextModel`, so another agent reuses the
- * port and none of this. Whatever happens, `explain` resolves with an explanation: a model
+ * check (ADR-0023), the cache, the daily cap and the logs. The model behind it is a
+ * `TextModel`, so another agent reuses the port and none of this. Whatever happens,
+ * `explain` resolves with an explanation: a model
  * that fails, is refused, or is out of budget gives way to the template.
  */
 
