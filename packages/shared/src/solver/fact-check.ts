@@ -527,8 +527,12 @@ const BY_MEANS_OF = /\b(?:using|with|by|via)\s*$/u;
  */
 const REMAINING =
   /(?:\bremaining(?:\s+(?:\d+|\w+))?(?:\s+(?:moves?|turns?))?|\bthe\s+rest(?:\s+of\s+the\s+(?:moves|sequence))?|\b(?:leaving|left)\s+(?:us\s+|you\s+)?with)(?:\s+(?:using|with|of))?\s*$/u;
-/** Where a clause starts: "…are joined, and the remaining moves using R U R' insert it". */
-const CLAUSE = /,\s*(?:and|then|but|while)\b|;/gu;
+/**
+ * Where a clause starts: "…are joined, and the remaining moves using R U R' insert it", or
+ * "join them and place them in the slot with R'". Not after a joining verb, so in "join
+ * and insert them using R U R'" both verbs stay with the run.
+ */
+const CLAUSE = /,\s*(?:then|but|while)\b|;|(?<!\bjoin\w*)\s+and\b/gu;
 
 /** What a run of moves is said to do, from the words around it. */
 function roleOf(before: string, after: string) {

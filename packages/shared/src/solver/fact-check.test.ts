@@ -305,6 +305,10 @@ describe('which moves join and which insert', () => {
   it('reads the verb before a run only within its own clause', () => {
     const text = "They are joined, and the last moves using U R' insert the pair.";
     expect(kinds(text, FIRST_PAIR)).toEqual([]);
+    // A real reply (seed 2028): the run after "with" is how the pair is placed, not joined.
+    const placed = "Use U R' U R2 to join them after 4 moves and place them in the slot with U R'.";
+    expect(kinds(placed, FIRST_PAIR)).toEqual([]);
+    expect(kinds("Join and insert them using U R'.", FIRST_PAIR)).toEqual(['move-role']);
   });
 
   it('reads "pairs" and "connects" as joining, but not "the joined pair" or "start joining"', () => {
