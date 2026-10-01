@@ -2900,3 +2900,85 @@ They have not been explained back yet.
    template, so failures, the cap and real answers could not be told apart. Calling the
    adapter directly makes every step one real call, and keeps failures (1 timeout) apart
    from refusals (0).
+
+## Checking what the model says (solve coaching, part 11)
+
+[ADR-0023](architecture/0023-explanation-fact-check.md) adds a fact check after the
+notation gate. The gate makes sure the model only names the step's own moves. The fact
+check makes sure that what it says about colours, places, counts and which moves do which
+job agrees with the facts it was given. It is plain code, with no second model, and when
+it disagrees the reader gets the template, exactly as when the gate refuses.
+
+### Why not ask a second model whether the first one was right?
+
+Because then you have two unchecked models instead of one. The judge spends the same
+free quota and adds its own delay, and it can approve a wrong claim or reject a true one
+for reasons no test can pin down. Here the truth is already sitting in the step's facts,
+built and re-checked by the engine. Comparing a claim with data you already have is
+ordinary code, and CLAUDE.md keeps deterministic work out of the AI.
+
+> "The facts were already computed. Checking a sentence against them is a lookup, not a
+> judgement, so it belongs in code that tests can hold to an exact answer."
+
+### How do you test a checker for false alarms, when you can't list every true sentence?
+
+Use a source of text that is true by construction: the template. It only restates facts,
+so every claim in it is right. The tests run the template through the check over 120
+solves on all six cross faces, about 600 steps, and require it to pass every one. Then
+they make one fact wrong in that same text (swap a colour, swap two edges' sides, put a
+pair somewhere it never was, give the join one extra move) and require the check to
+catch it. One test guards against false alarms, the other against missed errors.
+
+> "The template is a free oracle for true text. Pass it unchanged, fail it with one fact
+> mutated."
+
+### Why must a number be next to a noun before it counts as a claim?
+
+Because most numbers in English aren't counts. "This one is shortest" uses "one" as a
+pronoun. "Two of the moves are turns of the top" says nothing about how many moves there
+are. Reading every number would refuse true text all the time. So a number only counts
+when "moves", "edges", "pairs" or similar follows within two words, and the search stops
+at "of", "the", punctuation and so on. The cost is honest: "the sixth move" and "a single
+move" are not read, so a claim written that way is missed rather than refused.
+
+### Why tune on one live run and report on another?
+
+The rules were adjusted until they read the first corpus correctly: 10 alarms became 3,
+and all 3 were real. Reporting 3% from that same corpus would measure how well the rules
+were fitted to it, not how well they work. It's the same reason a model is evaluated on a
+test set it was never trained on. A second run, on a different seed, gave 7 alarms in 96
+replies, all 7 of them really wrong, plus 5 wrong replies that got through. That's the
+number that means something.
+
+### Why is "contradicted" a separate reason from "refused"?
+
+They have different causes and different fixes. A notation refusal means the prompt let
+the model invent a move. A contradiction means the model misread a fact, or the check
+misread the sentence. With one shared reason, every alarm in the log would have to be
+opened to tell which. The gate still runs first, so a reply that both invents a move and
+gets a fact wrong is reported as the stronger failure.
+
+### Why does the "both join and insert" exemption exist, and what does it cost?
+
+Replies often name the whole sequence and say it "joins the corner and edge and inserts
+the pair". That's a summary, and it's true. Checking it like a claim about the first part
+of the step would refuse good text. But the exemption is a gap: "R U F R F' R join them
+and insert", with `R` written where the step has `R'`, passed because of it. A rule always
+trades a kind of false alarm for a kind of miss, and the measurement is what tells you
+which trade you made.
+
+### Questions to answer out loud, without notes
+
+- The check reads only claims in shapes it knows. Name one true sentence it would wrongly
+  refuse, and one false sentence it would let through. Which kind of mistake is worse
+  here, and why?
+- The gate runs before the fact check. What would go wrong if the order were reversed?
+- 7 of 7 alarms were real, but in 4 the logged reason named the wrong claim. Does that
+  matter if the fallback was right anyway? Who reads that log, and what do they do with it?
+- The model made no colour, place or count mistakes in 196 replies. Should those rules
+  stay? Argue both sides.
+- `checkFacts` lives in `shared`, not the API. What would you lose by moving it next to
+  the prompt?
+- Tuning on seed 2026 and reporting on 2027 still leaves one problem if you tune again
+  after reading the 2027 replies. What is it, and how would you keep the number honest
+  over many rounds?

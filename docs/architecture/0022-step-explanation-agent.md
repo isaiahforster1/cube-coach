@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-30 (proposed 2026-09-29)
+Accepted — 2026-09-30 (proposed 2026-09-29). Amended by the proposed [ADR-0023](0023-explanation-fact-check.md), which adds the fact check its "Honest limits" names as the next step.
 
 The four open questions were answered by the product owner. The answers, and one change
 they forced, are under [Decisions on the open questions](#decisions-on-the-open-questions).

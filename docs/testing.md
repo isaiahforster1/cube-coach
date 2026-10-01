@@ -105,6 +105,12 @@ or use a quota:
   EXPLANATION_LIVE=1 pnpm --filter @cube-coach/api exec vitest run src/modules/solver/explanation-live
   ```
 
+  It also reports how often the fact check (ADR-0023) throws a reply away, and which claim
+  failed, without failing on it. Every reply is saved to `explanation-live.json` in the
+  system temp directory, so a change to the checks can be replayed against the same
+  replies for free. `EXPLANATION_LIVE_SEED` picks other scrambles: tune the checks on one
+  seed and report on another, or the number you report measures your own tuning.
+
 Every other test uses a fake model and never reaches the network.
 
 ## Coverage
