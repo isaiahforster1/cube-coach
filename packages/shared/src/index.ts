@@ -22,6 +22,8 @@ export * from './algorithms/index.js';
 export {
   checkNotation,
   chooseExplanation,
+  factOf,
+  notationIn,
   solveCross,
   solveF2L,
   templateExplanation,
@@ -31,5 +33,7 @@ export {
   type Explanation,
   type F2LResult,
   type PairStep,
+  type PieceSticker,
+  type SlotRef,
   type StepFact,
 } from './solver/index.js';
