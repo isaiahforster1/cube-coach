@@ -12,9 +12,14 @@ export function createStatsService(solves: SolvesRepository) {
      * are awkward in SQL and already implemented, tested and shared with the client. One
      * implementation that both sides run is worth more here than a faster query.
      *
-     * This is fine for a personal history of a few thousand solves and would not be for a
-     * hundred thousand. When that becomes real, the fix is a cached summary updated on
-     * write, not a second implementation of the averaging rules in SQL.
+     * The cost still grows with history, so two things keep it bounded. Writes are limited
+     * per account (see solves.routes.ts), which keeps growth at the pace of a person; and
+     * the cross analysis, the one part that runs the cube engine per solve, only looks at
+     * the most recent `CROSS_ANALYSIS_WINDOW` solves. What remains is linear and cheap:
+     * under 200ms at fifty thousand solves, measured with worst-case scrambles.
+     *
+     * When real histories reach hundreds of thousands, the fix is a cached summary updated
+     * on write, not a second implementation of the averaging rules in SQL.
      */
     async summary(userId: string, practiceSessionId?: string): Promise<StatsSummary> {
       const rows = await solves.listAllForStats(userId, practiceSessionId);

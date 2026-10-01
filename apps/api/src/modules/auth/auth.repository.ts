@@ -23,12 +23,44 @@ export function createAuthRepository(prisma: PrismaClient) {
       return prisma.user.findUnique({ where: { googleId } });
     },
 
-    linkGoogleAccount(userId: string, googleId: string) {
+    /**
+     * Attach a Google identity to an existing account, discarding every credential that
+     * was never proved: the password is cleared and all existing sessions are revoked.
+     *
+     * One transaction, because the order of failure matters. Linking and then failing to
+     * revoke would leave exactly the state this exists to prevent — the account now holds
+     * the real owner's identity while a stranger's session still works.
+     */
+    async linkGoogleAccount(userId: string, googleId: string, now: Date) {
+      const [user] = await prisma.$transaction([
+        prisma.user.update({
+          where: { id: userId },
+          // Google's verified email is proof of the address, so the account is now verified.
+          data: { googleId, passwordHash: null, emailVerifiedAt: now },
+        }),
+        prisma.authSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: now },
+        }),
+      ]);
+      return user;
+    },
+
+    /**
+     * Attach a Google identity to an account whose email was already verified. Its
+     * password and sessions were proved, so there is nothing to discard.
+     */
+    linkGoogleAccountToVerified(userId: string, googleId: string) {
       return prisma.user.update({ where: { id: userId }, data: { googleId } });
     },
 
     /** A Google account has no password, so it is created without one. */
-    createGoogleUser(data: { email: string; displayName: string; googleId: string }) {
+    createGoogleUser(data: {
+      email: string;
+      displayName: string;
+      googleId: string;
+      emailVerifiedAt: Date;
+    }) {
       return prisma.$transaction(async (tx) => {
         const user = await tx.user.create({ data });
 
@@ -49,6 +81,53 @@ export function createAuthRepository(prisma: PrismaClient) {
         });
 
         return user;
+      });
+    },
+
+    /**
+     * Store a new verification token, deleting any the user already had.
+     *
+     * One outstanding link per user: asking for another makes the old one useless, and
+     * the table cannot grow with how often someone presses "resend".
+     */
+    replaceVerificationToken(data: {
+      userId: string;
+      email: string;
+      tokenHash: string;
+      expiresAt: Date;
+    }) {
+      return prisma.$transaction([
+        prisma.emailVerificationToken.deleteMany({ where: { userId: data.userId } }),
+        prisma.emailVerificationToken.create({ data }),
+      ]);
+    },
+
+    /**
+     * Use up a verification token and mark the account verified, or return null.
+     *
+     * The token must belong to this user, be unused and unexpired, and have been sent to
+     * the address the account has now. All of that is the `where` of one conditional
+     * update, so two requests racing with the same token cannot both succeed: Postgres
+     * applies them one after the other, and the second finds `used_at` already set.
+     */
+    consumeVerificationToken(userId: string, tokenHash: string, now: Date) {
+      return prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+
+        const consumed = await tx.emailVerificationToken.updateMany({
+          where: {
+            tokenHash,
+            userId,
+            email: user.email,
+            usedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { usedAt: now },
+        });
+
+        if (consumed.count === 0) return null;
+
+        return tx.user.update({ where: { id: userId }, data: { emailVerifiedAt: now } });
       });
     },
 

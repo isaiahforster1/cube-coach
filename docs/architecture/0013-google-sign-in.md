@@ -4,6 +4,11 @@
 
 Accepted — 2026-09-19
 
+Amended by [ADR-0018](0018-authorisation-and-identity-rules.md) — 2026-09-26. The
+verification check below is necessary but not sufficient. Registration does not verify
+email, so linking also discards the account's password and sessions, and an account
+already linked to one Google subject is never re-linked to another.
+
 ## Context
 
 Email and password works, and it is friction. Someone who wants their solves kept has to
@@ -59,8 +64,9 @@ display name.
 Not automatic, and cannot be: it needs a Google Cloud OAuth client, created by hand.
 
 1. Create an OAuth 2.0 Client ID at <https://console.cloud.google.com/apis/credentials>.
-2. Register `http://localhost:3000/api/v1/auth/google/callback` as an authorised redirect
-   URI, and the production equivalent when there is one.
+2. Register `http://localhost:5173/api/v1/auth/google/callback` as an authorised redirect
+   URI, and the production equivalent when there is one. Development goes through the
+   Vite proxy, because the callback redirects relatively (see ADR-0017).
 3. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI` in
    `apps/api/.env`. They are commented out in `.env.example`.
 

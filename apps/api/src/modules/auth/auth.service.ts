@@ -22,6 +22,7 @@ export function toPublicUser(user: User): PublicUser {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    emailVerified: user.emailVerifiedAt !== null,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -76,12 +77,20 @@ export function createAuthService(repository: AuthRepository) {
      * Sign in with Google, creating or linking an account as needed.
      *
      * Three cases, in order: an account already linked to this Google subject; an account
-     * with the same email, which gets linked; or a new account.
+     * with the same email and no Google account yet, which gets linked; or a new account.
+     * An account with the same email but a different Google subject is refused.
      *
      * Linking by email is only safe because Google is asked whether the address is
      * verified, and an unverified one is refused outright. Without that check, anyone who
      * could create a Google account claiming someone else's address could take over their
      * CubeCoach account — which is the classic way this integration goes wrong.
+     *
+     * The check covers only half of it. The account being linked into may have been
+     * prepared by an attacker who registered the victim's address first
+     * ("pre-hijacking"). If that account never verified its email, the Google identity is
+     * the first real proof of ownership, and linking discards everything that came before
+     * it: the password is cleared and every existing session is revoked. If it did verify,
+     * its password was proved too, and it survives (ADR-0019).
      */
     async signInWithGoogle(
       profile: GoogleProfile,
@@ -101,8 +110,29 @@ export function createAuthService(repository: AuthRepository) {
       }
 
       const existing = await repository.findUserByEmail(profile.email);
+      if (existing !== null && existing.googleId !== null) {
+        // The address already belongs to a different Google account. Most likely it was
+        // reassigned — a workspace administrator gave it to someone new — and the newcomer
+        // has no claim on the previous holder's history. Accounts are matched on subject,
+        // not email (ADR-0013), so this is refused rather than re-linked.
+        throw new ApiError(
+          409,
+          'GOOGLE_ACCOUNT_MISMATCH',
+          'That email address is already linked to a different Google account',
+        );
+      }
+
       if (existing !== null) {
-        const user = await repository.linkGoogleAccount(existing.id, profile.sub);
+        // A verified email means the password was proved by someone who also reads the
+        // inbox, so it survives. Otherwise the credentials are discarded (ADR-0019).
+        //
+        // Deciding on a value read a moment ago is safe here. The only change that can
+        // happen in between is an address becoming verified, and missing it only means
+        // discarding a password that could have been kept: the cautious side.
+        const user =
+          existing.emailVerifiedAt === null
+            ? await repository.linkGoogleAccount(existing.id, profile.sub, new Date())
+            : await repository.linkGoogleAccountToVerified(existing.id, profile.sub);
         return { user, token: await this.startSession(user.id, userAgent) };
       }
 
@@ -110,6 +140,8 @@ export function createAuthService(repository: AuthRepository) {
         email: profile.email,
         displayName: profile.name,
         googleId: profile.sub,
+        // Google proved the address; there is nothing left for us to check.
+        emailVerifiedAt: new Date(),
       });
 
       return { user, token: await this.startSession(user.id, userAgent) };
@@ -132,6 +164,11 @@ export function createAuthService(repository: AuthRepository) {
 
     async logout(token: string): Promise<void> {
       await repository.revokeSession(hashSessionToken(token), new Date());
+    },
+
+    /** Revoke every session the user has, on every device, including the caller's own. */
+    async logoutEverywhere(userId: string): Promise<void> {
+      await repository.revokeAllSessionsForUser(userId, new Date());
     },
 
     /**

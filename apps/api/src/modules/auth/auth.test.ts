@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestContext, type TestContext } from '../../test/context.js';
 import { SESSION_COOKIE } from './auth.cookie.js';
 
@@ -63,6 +63,20 @@ describe('POST /auth/register', () => {
     });
     expect(response.body).not.toContain('passwordHash');
     expect(response.body).not.toContain(CREDENTIALS.password);
+  });
+
+  /**
+   * Registration proves nothing about who owns the address, so a new password account
+   * starts unverified. Anything that treats the address as proved must wait for the link.
+   */
+  it('starts the account with an unverified email', async () => {
+    const response = await register();
+
+    expect(response.json().user.emailVerified).toBe(false);
+    const user = await context.prisma.user.findUniqueOrThrow({
+      where: { email: CREDENTIALS.email },
+    });
+    expect(user.emailVerifiedAt).toBeNull();
   });
 
   it('sets an httpOnly session cookie', async () => {
@@ -287,6 +301,62 @@ describe('POST /auth/logout', () => {
   });
 });
 
+/**
+ * After a lost phone or a suspected compromise, the one thing a user needs is to end every
+ * login they cannot see. Logging out only ends the session making the request.
+ */
+describe('POST /auth/logout-all', () => {
+  function me(token: string) {
+    return context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [SESSION_COOKIE]: token },
+    });
+  }
+
+  function logoutAll(token?: string) {
+    return context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout-all',
+      ...(token === undefined ? {} : { cookies: { [SESSION_COOKIE]: token } }),
+    });
+  }
+
+  it('ends every session the user has, including this one', async () => {
+    const laptop = sessionCookie(await register());
+    const phone = sessionCookie(await login());
+
+    const response = await logoutAll(laptop);
+
+    expect(response.statusCode).toBe(204);
+    expect((await me(laptop)).statusCode).toBe(401);
+    expect((await me(phone)).statusCode).toBe(401);
+  });
+
+  it('clears the cookie in this browser', async () => {
+    const token = sessionCookie(await register());
+
+    const response = await logoutAll(token);
+    const cleared = response.cookies.find((cookie) => cookie.name === SESSION_COOKIE);
+
+    expect(cleared?.value).toBe('');
+  });
+
+  it('leaves other users signed in', async () => {
+    const mine = sessionCookie(await register());
+    const theirs = sessionCookie(await register({ email: 'someone-else@example.com' }));
+
+    await logoutAll(mine);
+
+    expect((await me(theirs)).statusCode).toBe(200);
+  });
+
+  /** Otherwise anyone could sign anyone out by sending the request. */
+  it('requires a signed-in user', async () => {
+    expect((await logoutAll()).statusCode).toBe(401);
+  });
+});
+
 describe('rate limiting', () => {
   it('rejects repeated credential attempts with 429', async () => {
     const limited = await createTestContext({ rateLimit: { credentialMax: 3 } });
@@ -310,6 +380,48 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+});
+
+/**
+ * Behind a load balancer the client's address arrives in X-Forwarded-For. A proxy that
+ * appends to the header leaves whatever the client sent on the left and adds the address
+ * it actually saw on the right, so only the rightmost entry — the one our own proxy
+ * wrote — can be believed. Trusting every hop takes the leftmost, which the client chose.
+ */
+describe('rate limiting behind a proxy', () => {
+  let limited: TestContext;
+
+  beforeAll(async () => {
+    limited = await createTestContext({ production: true, rateLimit: { credentialMax: 3 } });
+  });
+
+  afterAll(async () => {
+    await limited.close();
+  });
+
+  const attemptFrom = (forwardedFor: string) =>
+    limited.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      // The proxy's own address, as the socket sees it.
+      remoteAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': forwardedFor },
+      payload: { email: 'nobody@example.com', password: 'wrong-password-here' },
+    });
+
+  it('cannot be dodged by forging the left of X-Forwarded-For', async () => {
+    const statuses = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      statuses.push((await attemptFrom(`203.0.113.${attempt}, 198.51.100.50`)).statusCode);
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429, 429]);
+  });
+
+  it('still tells real clients apart', async () => {
+    const response = await attemptFrom('198.51.100.99');
+    expect(response.statusCode).toBe(401);
   });
 });
 

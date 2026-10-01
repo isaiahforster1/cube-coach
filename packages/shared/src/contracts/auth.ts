@@ -48,14 +48,25 @@ export const loginRequestSchema = z.object({
   password: z.string().min(1, 'Password is required').max(128),
 });
 
+/**
+ * The token from an emailed verification link: 32 random bytes, base64url-encoded, which
+ * is always 43 characters. Checking the shape first means nothing else reaches a lookup.
+ */
+export const verifyEmailRequestSchema = z.object({
+  token: z.string().regex(/^[\w-]{43}$/u, 'Not a verification token'),
+});
+
 /** The user as the API returns it. Never includes the password hash. */
 export const publicUserSchema = z.object({
   id: z.uuid(),
   email: z.string(),
   displayName: z.string(),
+  /** Whether the address has been proved to belong to this account (ADR-0019). */
+  emailVerified: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
 export type PublicUser = z.infer<typeof publicUserSchema>;

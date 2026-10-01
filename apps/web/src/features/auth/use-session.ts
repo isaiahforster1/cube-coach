@@ -63,11 +63,15 @@ export function useRegister() {
   });
 }
 
-export function useLogout() {
+/**
+ * Sign out. With `everywhere`, every session the user has is revoked, on every device,
+ * this one included — for a lost phone or a login they do not recognise.
+ */
+export function useLogout({ everywhere = false }: { everywhere?: boolean } = {}) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => api.post<void>('/auth/logout'),
+    mutationFn: () => api.post<void>(everywhere ? '/auth/logout-all' : '/auth/logout'),
     onSuccess: async () => {
       queryClient.setQueryData(SESSION_QUERY_KEY, null);
       // Drop everything else too. Cached solves and statistics belong to the user who

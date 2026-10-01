@@ -1970,6 +1970,492 @@ reports fine, which is right — it has a keyboard and its owner will use it.
 > "You can't ask whether there's a keyboard. You can ask whether the primary pointer is a
 > finger, which is the proxy the platform provides for exactly this."
 
+## Security review fixes
+
+Ten findings from a security review, fixed one commit at a time. Each has a regression test
+that was run and seen to fail before the fix went in.
+
+### What is account pre-hijacking, and how was CubeCoach open to it?
+
+The attacker gets to the account before its owner does. Registration here never proves that
+the person typing an email address owns it, so an attacker can register
+`victim@gmail.com` with a password of their own and simply leave that session open.
+
+Months later the real owner signs in with Google. Google says the address is verified, the
+email matches an existing account, and the sign-in links the two. The owner sees a normal
+account, starts saving solves, and the attacker is still inside it with a working session
+and a working password.
+
+The `email_verified` check did its job. It proved the _Google_ side of the link belonged to
+the address. Nothing had ever proved that the _CubeCoach_ side did, and linking treated both
+sides as trustworthy.
+
+> "Checking that Google verified the email proves who's arriving. It says nothing about who
+> set up the account they're arriving into."
+
+### What does the fix do, and why both halves?
+
+Linking by email now clears the password and revokes every existing session, in the same
+transaction that sets `googleId`.
+
+- **Clearing the password** closes the door the attacker would use next time.
+- **Revoking the sessions** closes the one they are already standing in. A session token is
+  a credential that outlives the password: changing or clearing the password does nothing
+  to a login that already happened. That is true of every "reset your password" flow too,
+  which is why a good one revokes sessions as well.
+
+The two writes share a transaction because the half-done state is the dangerous one. Linked
+but not revoked means the real owner's identity is on the account and a stranger is still
+signed into it.
+
+> "The password is the next way in. The session is the way they're already in. Either one
+> left behind means the fix didn't work."
+
+### Doesn't that punish a genuine user who registered with a password first?
+
+A little. They lose the password and have to sign in with Google from then on. The server
+cannot tell them apart from an attacker, because neither of them ever proved the address.
+The one thing the server knows for certain is that the Google sign-in owns the email, so
+that is the credential that survives.
+
+The proper long-term fix is to verify email at registration. Then a password would already
+have been proved, and linking could keep it. Until that exists, discarding it is the only
+safe option.
+
+> "An unverified credential never survives a link. If you want to keep your password, the
+> product has to have checked it first."
+
+### What happens when an email address is recycled?
+
+A workspace administrator can take `alex@company.com` from one employee and give it to the
+next. The new holder signs in with Google and presents the same email with a different
+**subject**, Google's permanent account ID.
+
+The old code found the account by email and overwrote its `googleId`, so the newcomer got
+the previous holder's account and solve history. That contradicted ADR-0013, which exists to
+match on subject precisely because email is not stable.
+
+Now linking by email only happens when the account has no Google identity yet. An account
+already linked to a different subject is refused with `409 GOOGLE_ACCOUNT_MISMATCH`, and
+the browser is sent back to the login page with a message saying so.
+
+Telling the person why does not leak much. To see the message they must hold a verified
+Google account for that exact address, so they already know the address is theirs today.
+
+> "Subject is identity, email is contact information. Email can find an account that has no
+> Google identity yet. It can never replace one."
+
+### How could someone take down the statistics endpoint?
+
+By saving a lot of solves. Statistics are computed over everything stored, and two things
+grew badly with that:
+
+- `Math.min(...times)`. A spread passes every element as a separate function argument,
+  and arguments live on the call stack. Somewhere past 150,000 solves the stack overflows
+  and the request fails with "Maximum call stack size exceeded". A loop needs one variable
+  whatever the size.
+- The cross analysis runs the cube engine on every scramble, about 50 µs each at the
+  longest scramble the API accepts. At 50,000 solves that is 2.6 seconds with the event
+  loop blocked, which means every other user's request waits too. Node runs your code on
+  one thread, so one slow request is everyone's slow request.
+
+Measuring first mattered. The averages looked like the obvious suspect, but they took 84 ms
+at 50,000. Nearly all the cost was the cross analysis.
+
+> "The size of a user's history is something the user controls. Anything whose cost grows
+> with it needs a bound, or the user controls your latency too."
+
+### Why limit the cross analysis to the last thousand solves?
+
+It is a product decision as much as a performance one. The insight answers "do you
+_currently_ give up planning the cross when it's hard?", which is a habit, and habits
+change. Solves from two years ago would dilute exactly the improvement the tool is meant to
+notice. A thousand is far above the minimum evidence the analysis needs, and costs about
+50 ms at worst.
+
+It lives in the shared `buildStatsSummary`, so a guest's browser and the server still
+compute identical numbers.
+
+### Why a batch endpoint instead of just a looser rate limit?
+
+The per-account limit on `POST /solves` is 60 a minute. A person cannot get near that: the
+world record is about three seconds, and real practice includes scrambling.
+
+Guest migration was the problem. It uploaded a stored history one solve at a time, and a
+guest can hold thousands. Loosening the limit enough for that would make it meaningless for
+the human case. So the two workloads get separate endpoints with separate budgets:
+`POST /solves/batch` takes up to 100 solves and allows 10 batches a minute. A typical guest
+now migrates in one request instead of hundreds.
+
+Both limits are keyed on the **account**, not the IP. An attacker can use as many IPs as
+they like, but each request has to be signed in as someone. That meant running the limiter
+as a `preHandler` after `requireAuth` instead of on request arrival, because the user is
+not known yet at that point.
+
+> "Don't loosen a limit meant for people to make room for a machine. Give the machine its
+> own endpoint and its own budget."
+
+### Google sign-in in production sent people to localhost. How?
+
+A development default leaked into production. `WEB_ORIGIN` defaulted to
+`http://localhost:5173`, Railway never set it, and the Google callback built its redirect
+from it. A successful sign-in set the session cookie and then sent the browser to a
+machine that wasn't there. The same value went into the CORS headers, so production told
+browsers that `localhost:5173` could make credentialed requests.
+
+Two fixes, for two reasons:
+
+- **The redirects are relative** (`/`, `/login?error=…`). One origin serves both halves
+  (ADR-0017), so the browser is already in the right place. A relative redirect cannot
+  point anywhere else, whatever the configuration says.
+- **Production has no default, and no CORS unless it is set.** Same-origin requests never
+  involve CORS. With no CORS headers at all, the browser refuses every cross-origin read,
+  which is the strongest setting there is. Making the variable _required_ was the other
+  option, but that means configuring something production never uses, and deploying this
+  change would have crashed on startup until someone set it.
+
+> "A default is a production value you didn't choose. Development defaults should only
+> apply in development."
+
+### Why is allowing an extra origin in CORS a security problem, not just untidy?
+
+`Access-Control-Allow-Origin: X` with `Allow-Credentials: true` means "a page on X may
+send requests carrying this user's cookie _and read the responses_". Anything able to serve
+a page on `localhost:5173` on a visitor's machine, such as a dev server or a local process
+bound to that port, could read their CubeCoach data. CORS is an exception to the same-origin
+policy, and every origin on the list is a hole in it.
+
+> "CORS only ever loosens the browser's default protection. The safest CORS configuration
+> is none at all."
+
+### How did an idempotent create leak another user's solve?
+
+Creating a solve is an upsert on the client-generated id with an empty update: "insert
+this, or if the id already exists, give me the stored row". That makes a retry after a
+dropped connection harmless.
+
+The lookup was by **id alone**. If user B sent a request with user A's solve id, nothing
+was written, and the stored row was returned to B with a 200: A's time, scramble, date and
+private comment. Every other solve endpoint scoped by `userId`; this one didn't, because
+an upsert doesn't look like a read.
+
+The fix checks the returned row's owner. If it isn't the caller, the request fails with
+`409 SOLVE_ID_CONFLICT` and the row is never serialised. The owner's own retries still
+behave exactly as before.
+
+Is the 409 itself a leak? It confirms that an id exists. But ids are random UUIDs, so B
+could only send one they had already obtained, and nothing about the solve is revealed.
+
+> "An idempotency key identifies a request, not a permission. Every lookup by id also
+> checks who is asking, including the ones hidden inside a write."
+
+### Why validate a path parameter when the database would reject a bad one anyway?
+
+It did reject it, as a 500. Postgres refuses `not-a-uuid` as a `uuid` value, the driver
+throws, and the error handler treats an unexpected exception as a bug in the server. So a
+typo in a URL was reported as a crash, it was logged as one, and in development the
+response carried the database's error message.
+
+Letting the database be the validator means its error handling becomes your API's error
+handling. A zod schema at the edge makes the id a checked input like the body and the
+query: a malformed one is a 400 `VALIDATION_FAILED`, and the handler receives a value
+whose type came from the check rather than from a type annotation nobody verifies.
+
+`Params: { id: string }` in the old route signatures was exactly that kind of annotation.
+It told TypeScript the id was a string, which is always true of a path segment, and said
+nothing about whether it was an id.
+
+> "A type annotation on request input is a promise nobody checks. Parse it, and the type
+> comes from the check."
+
+### How could someone get unlimited login attempts past the rate limiter?
+
+By writing their own IP address. Behind a load balancer the socket address is the load
+balancer's, so the client's real address arrives in `X-Forwarded-For`. A proxy that
+_appends_ to that header keeps whatever the client sent and adds the address it saw:
+
+```
+X-Forwarded-For: 203.0.113.7, 198.51.100.50
+                 ^ client wrote this   ^ our proxy wrote this
+```
+
+`trustProxy: true` believes every entry and takes the leftmost, the client's claim. A
+different forged value on each request meant a fresh rate-limit bucket each time. Only
+entries written by proxies you run can be believed, so you count your proxies from the
+right. Railway happened to overwrite the header, so production was fine, but only because
+of a platform detail nobody had written down.
+
+> "X-Forwarded-For is read right to left. Each entry is only as trustworthy as whoever
+> wrote it, and the leftmost one was written by the client."
+
+### Why a trust function instead of `trustProxy: 1`?
+
+Because in Fastify 5, `1` doesn't mean one hop. A numeric `trustProxy` trusts _nothing_,
+so `request.ip` is always the socket address, which is the load balancer. Every user would
+have shared one rate-limit bucket, and ten failed logins anywhere would have locked
+everybody out for fifteen minutes.
+
+The regression test that proved the forged header was ignored passed with `1`. What caught
+it was a second test asserting that two real clients still get separate buckets. A security
+fix needs a test for the thing it must not break as well as the thing it must stop.
+
+`(address, hop) => hop < 1` says what is meant: trust the immediate peer, our proxy, and
+nothing behind it. That relies on the container being reachable only through the proxy,
+which is true on Railway, and the comment says so.
+
+> "Test the fix in both directions: the attack fails _and_ legitimate users are still told
+> apart. A rate limiter that puts everyone in one bucket 'passes' the first test."
+
+### Why add "sign out everywhere" if logout already revokes sessions server-side?
+
+Logout ends one session, the one making the request. A user who has lost a phone, or who
+suspects someone else is signed in, has no way to reach the sessions they cannot see, and
+those are exactly the ones that matter. `POST /auth/logout-all` revokes every session the
+user has, their own included, and clears the cookie.
+
+It is the same property that justified server-side sessions in ADR-0006. With a JWT, every
+issued token stays valid until it expires, and there is nothing to revoke. With stored
+sessions it is one `UPDATE ... WHERE user_id = ?`.
+
+Unlike plain logout, it requires a valid session. Logout acts on a token the caller holds;
+logout-all acts on an _account_, so it has to know whose, and must not let anyone sign
+anyone else out.
+
+The comment on the session length also said it lasted thirty days "without activity",
+which described an idle timeout. The code sets an absolute expiry at creation, and
+activity never extends it. The difference matters: an absolute expiry bounds how long a
+stolen token works, even if the thief keeps using it.
+
+> "A session store's real advantage is revocation, so give users a way to use it. And
+> know whether your expiry is absolute or idle; they protect against different things."
+
+### The OAuth flow already had a state parameter. What does PKCE add?
+
+They protect against different things.
+
+- **State** stops an attacker planting _their_ code in _your_ browser (login CSRF). The
+  callback refuses any state it did not issue.
+- **PKCE** stops an attacker using _your_ code in _their_ request. The code travels
+  through URLs, where it can land in browser history, proxy logs or a Referer header. With
+  PKCE, the start of the flow picks a random verifier, keeps it in an httpOnly cookie, and
+  sends Google only its SHA-256 hash (the challenge). The token exchange must present the
+  verifier itself, so Google will not honour a code without it.
+
+The client secret already protected the exchange, so PKCE here is defence in depth rather
+than the only lock. It is still the current recommendation for every OAuth client,
+confidential ones included, because a leaked secret and a leaked code together would
+otherwise be enough.
+
+> "State proves the callback belongs to a flow I started. PKCE proves the code exchange
+> does too. The verifier never travels in a URL, so a leaked code is worthless."
+
+### Why strip query strings from every logged URL, not just the callback?
+
+Fastify's default request log includes the full URL, and the callback's query string held
+a live authorization code. Logs are kept for a long time, shipped to third-party services
+and readable by more people than the database is.
+
+Stripping the query everywhere is simpler than listing the dangerous routes, and it is
+safe by default. A secret added to some future route's query is protected without anyone
+remembering to add it to a list. The cost is small: the query values that stop being logged
+are cursors and practice-session ids.
+
+A proxy in front of the app, like Railway's edge, may still log full URLs, and that is out
+of our hands. That is exactly the case PKCE covers.
+
+> "Don't log what you wouldn't store. Make the safe behaviour the default rather than
+> something each route has to opt into."
+
+### A test failed because the RFC test vector was wrong. What happened?
+
+The test compared our S256 function with the worked example in RFC 7636, appendix B, but
+the example had been written from memory and two strings were off by a few characters. The
+failing test looked like a broken implementation. Before changing any code, the hash was
+recomputed with `openssl` and the real appendix was checked, which showed the
+implementation was right and the test data was wrong.
+
+> "When a known-answer test fails, check the known answer first. It's data, and data typed
+> from memory is the least reliable part of the test."
+
+### Why should the application's database role not be able to change the schema?
+
+Least privilege. The running application reads and writes rows and nothing else. Only
+migrations create, alter or drop tables. When one role does both, any way of making the
+application run SQL it did not intend, whether an injection bug, a compromised dependency
+or a leaked connection string, can also `DROP TABLE solves`.
+
+So there are two connections. `DATABASE_URL` is a role with `SELECT, INSERT, UPDATE,
+DELETE` only. `MIGRATION_DATABASE_URL` is the schema owner, used by `migrate deploy` and
+nothing else.
+
+Three details carry the design:
+
+- **The fallback lives in the start script, not in `prisma.config.ts`.** The test setup runs
+  `migrate deploy` against the test database through `DATABASE_URL`. Had the config
+  preferred `MIGRATION_DATABASE_URL`, a developer with it in their `.env` would have had
+  their tests migrate the wrong database.
+- **The server never inherits the privileged URL.** It is set as a prefix on the one prisma
+  command, and unset before `exec node`. Environment variables are easy to leak through
+  crash reports, debug endpoints or a child process.
+- **`ALTER DEFAULT PRIVILEGES`.** Granting on `ALL TABLES` covers the tables that exist
+  today. Tables created by the next migration need default privileges, set for the role
+  that runs migrations, or the first deploy with a new table breaks the app. This was
+  checked on a throwaway local database before it went into the docs.
+
+> "The app gets rows, the migrator gets schema. Grants cover today's tables; default
+> privileges cover tomorrow's."
+
+### Teach-back: H1, to answer in your own words
+
+Not yet explained back. Answer each out loud before reading the entries above, then compare.
+If an answer doesn't hold up, that is the part to re-read.
+
+1. **Walk through the attack step by step.** Who does what, in what order, and at what
+   point does the attacker gain access to the victim's data?
+2. **We already refused unverified Google emails. Why wasn't that enough?** What exactly
+   did `email_verified` prove, and what did it not prove?
+3. **Why clear the password rather than keep it?** The real owner might have set it. What
+   does the server know, and what can't it know?
+4. **Suppose the password was cleared but sessions were not revoked.** What does the
+   attacker still have, and for how long? (Hint: the session expiry is absolute, 30 days
+   from sign-in.)
+5. **Why must the two writes share one transaction?** Describe the state the database is
+   left in if the second write fails.
+6. **If registration verified email, what would change about this fix?** Would the password
+   still need clearing? Would the sessions still need revoking?
+7. **Follow-up an interviewer might add:** the fix discards credentials. What does a
+   genuine user who registered with a password experience afterwards, and how would you
+   explain that trade-off to a product owner?
+
+## Email verification
+
+Registration now proves the address, which lets a verified password survive a Google link
+(ADR-0019). Every test was written first and seen to fail.
+
+### Why does verifying need a signed-in session as well as the link?
+
+Because the link only proves the inbox. The thing that has to be proved is that **the
+person who chose the password** owns the address.
+
+With a link alone, pre-hijacking survives verification. The attacker registers
+`victim@gmail.com`; we email the victim "confirm your address"; the victim, reasonably,
+clicks it. Now the attacker's password is "verified", and the new rule keeps it when the
+victim later signs in with Google. Requiring the session means whoever clicks has to know
+the password too. The victim doesn't, so nothing is verified.
+
+This is the most common way email verification is built, and the gap is easy to miss
+because the email _looks_ like proof.
+
+> "The link proves the inbox, the session proves the password. Verification means proving
+> they belong to the same person, so you need both."
+
+### Why is the token in the URL fragment, and why does the page POST it?
+
+The **fragment** (`#token=…`) is never sent to a server by the browser. A query string
+is, so it lands in access logs, proxy logs, analytics and the `Referer` header of anything
+the page loads. The server's log serializer already strips query strings, but the fragment
+is never there to strip.
+
+The **POST** is about mail scanners. Corporate and webmail security tools open links in
+incoming mail to check them. If a GET verified the address, the scanner would use up the
+single-use token before the person clicked, and they would see "link expired" on their
+first try. A page that has to run JavaScript and then POST is something a scanner won't do.
+
+> "Fragments stay in the browser, and GETs get followed by robots. So the token rides in
+> the fragment and only a POST spends it."
+
+### How is a single-use token enforced when two requests arrive at once?
+
+By making "check it's unused" and "mark it used" the same statement:
+`UPDATE ... SET used_at = now() WHERE token_hash = $1 AND user_id = $2 AND used_at IS NULL
+AND expires_at > now()`, then counting the rows updated.
+
+Reading first and writing second would race: both requests read "unused" and both
+succeed. With one conditional update, Postgres locks the row for the first, and the second
+re-checks the `WHERE` after the first commits, finds `used_at` set, and updates nothing.
+The same pattern is behind "compare-and-swap" and optimistic concurrency.
+
+> "Check-then-act is a race. Put the check in the WHERE of the act."
+
+### Why is the token hashed, but with SHA-256 rather than Argon2?
+
+Hashed for the same reason as passwords and sessions: a leaked database dump should hold
+nothing usable. SHA-256 rather than a slow hash because the token has 256 random bits.
+Slow hashing exists to make guessing low-entropy passwords expensive, and there is nothing
+to guess here.
+
+### Why leave the display name out of the email?
+
+The person registering may be an attacker using someone else's address, and the email goes
+to that someone else, from our domain. Anything the registrant typed becomes content we
+send on their behalf. A display name of "Claim your prize at evil.example" turns the
+verification email into phishing with our name on it. Fixed text plus the link gives an
+attacker nothing to write.
+
+> "If the recipient didn't ask for the email, nothing the sender typed should be in it."
+
+### Why is the link's address configuration, not the request's Host header?
+
+`Host` is chosen by whoever sends the request. If links were built from it, an attacker
+could trigger an email to a user with `Host: evil.example` and the user would receive a
+genuine email from us linking to the attacker's site. This is **host header poisoning**,
+and password-reset emails are the classic victim. So `APP_URL` is set per environment,
+and production refuses to start with email configured but no `APP_URL`.
+
+### How do the endpoints avoid revealing which addresses are registered?
+
+Neither takes an address. Resend sends to the signed-in account's own address, and verify
+takes only a token. There is nothing to probe with. Every bad token also gets the same
+response, so the endpoint can't be used to tell "never existed" from "used" from "someone
+else's".
+
+### Why does a failed send not fail registration, but does fail resend?
+
+Registration's job is to create the account, which works without verification. Refusing
+new users because the email provider is down would turn an optional step into an outage.
+Resend's _only_ job is sending the email, so if that fails, the honest answer is an error.
+
+### Why an interface for one provider?
+
+So that tests never send real mail or need a key, and so the provider is a one-file
+change. `EmailSender` has one method. Resend, a development logger and a test fake all
+implement it, and nothing that sends mail knows which one it has. It is the same reasoning
+as the injectable `fetch` in the Google exchange: isolate the part you can't control.
+
+### What does a verified password change when Google links the account?
+
+| Account              | Password | Sessions    |
+| -------------------- | -------- | ----------- |
+| Email verified       | kept     | kept        |
+| Email never verified | cleared  | all revoked |
+
+The decision reads `email_verified_at` just before linking. A value read a moment ago can
+be stale, but the only change possible is null becoming verified, and missing that
+discards a password that could have been kept. When a race can only push you towards the
+safe side, you don't need a lock.
+
+### Teach-back: email verification, to answer in your own words
+
+Written questions to answer before re-reading the entries above.
+
+1. **Walk through pre-hijacking against a link-only design.** At which step does the
+   attacker's password become "verified", and which step does the session requirement
+   break?
+2. **What exactly does the verified flag claim?** Name the two facts it stands for, and the
+   request that establishes both.
+3. **Why a fragment and not a query string?** List three places a query string would end up
+   that a fragment never reaches.
+4. **A user says their link was "already used" the first time they clicked it.** What is the
+   likely cause, and how does this design prevent it?
+5. **Two tabs submit the same token at the same moment.** Describe what Postgres does, step
+   by step, and why only one succeeds.
+6. **Why are unverified accounts allowed to do everything?** What would blocking them cost,
+   and which risk does allowing them leave open? (Hint: address squatting.)
+7. **An interviewer asks:** "Your verification email includes a greeting with the user's
+   name. Is that a problem?" How do you answer?
+8. **An interviewer asks:** "How would you add password reset on top of this?" Which parts
+   can you reuse, and what must reset do that verification doesn't? (Hint: sessions.)
+
 ## Whole-cube rotations (solve coaching, part 1)
 
 ### Why is a rotation not just another `Move`?

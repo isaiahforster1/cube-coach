@@ -3,7 +3,12 @@ import { createHash, randomBytes } from 'node:crypto';
 /** 256 bits of entropy. Guessing one is not a realistic attack at this size. */
 const TOKEN_BYTES = 32;
 
-/** How long a login lasts without activity. */
+/**
+ * How long a login lasts from the moment it starts, regardless of activity.
+ *
+ * An absolute expiry, not an idle timeout: using the app does not extend it. After thirty
+ * days the user signs in again, which bounds how long a stolen token stays useful.
+ */
 export const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Refresh `lastUsedAt` at most this often, to avoid a write on every single request. */

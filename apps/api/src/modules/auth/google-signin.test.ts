@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestContext, type TestContext } from '../../test/context.js';
+import { SESSION_COOKIE } from './auth.cookie.js';
 import { createAuthRepository } from './auth.repository.js';
 import { createAuthService, type AuthService } from './auth.service.js';
 import type { GoogleProfile } from './google.js';
@@ -27,6 +28,31 @@ function profile(overrides: Partial<GoogleProfile> = {}): GoogleProfile {
   };
 }
 
+/** Register with a password over HTTP, as an attacker would, and return the session cookie. */
+async function registerWithPassword(): Promise<string> {
+  const response = await context.app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    payload: {
+      email: 'cuber@example.com',
+      password: 'a-long-enough-password',
+      displayName: 'Password Cuber',
+    },
+  });
+
+  const cookie = response.cookies.find((candidate) => candidate.name === SESSION_COOKIE);
+  if (cookie === undefined) throw new Error('No session cookie was set');
+  return cookie.value;
+}
+
+function me(token: string) {
+  return context.app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    cookies: { [SESSION_COOKIE]: token },
+  });
+}
+
 describe('signing in with Google', () => {
   it('creates an account the first time', async () => {
     const { user } = await authService.signInWithGoogle(profile(), null);
@@ -35,6 +61,13 @@ describe('signing in with Google', () => {
     expect(user.googleId).toBe('google-subject-1');
     // No password at all, rather than an unusable placeholder that could be attacked.
     expect(user.passwordHash).toBeNull();
+  });
+
+  /** Google has already proved the address, so there is nothing left for us to check. */
+  it('treats the email of a new Google account as verified', async () => {
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
   });
 
   it('gives the new account a practice session, like any other', async () => {
@@ -68,22 +101,107 @@ describe('signing in with Google', () => {
    * solve history in two.
    */
   it('links Google to an account that already has that email', async () => {
-    await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/register',
-      payload: {
-        email: 'cuber@example.com',
-        password: 'a-long-enough-password',
-        displayName: 'Password Cuber',
-      },
-    });
+    await registerWithPassword();
 
     const { user } = await authService.signInWithGoogle(profile(), null);
 
     expect(await context.prisma.user.count()).toBe(1);
     expect(user.googleId).toBe('google-subject-1');
-    // The password still works afterwards; linking adds a way in, it does not replace one.
-    expect(user.passwordHash).not.toBeNull();
+    // The password was never proved to belong to the address, so it does not survive the
+    // link. Google's verified email is the first real proof of ownership.
+    expect(user.passwordHash).toBeNull();
+  });
+
+  it('marks the email verified when linking, because Google proved it', async () => {
+    await registerWithPassword();
+
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
+  });
+
+  /**
+   * Account pre-hijacking. Registration does not verify the email, so an attacker can
+   * register the victim's address first and keep that session open. When the real owner
+   * later signs in with Google they are linked into the prepared account — and without
+   * this, the attacker's session and password would both still work.
+   */
+  it('revokes every session that existed before the link', async () => {
+    const attackerCookie = await registerWithPassword();
+    expect((await me(attackerCookie)).statusCode).toBe(200);
+
+    const { token: victimToken } = await authService.signInWithGoogle(profile(), null);
+
+    expect((await me(attackerCookie)).statusCode).toBe(401);
+    // The session started by the link itself is, of course, still good.
+    expect((await me(victimToken)).statusCode).toBe(200);
+  });
+
+  it('stops the pre-link password from signing in', async () => {
+    await registerWithPassword();
+    await authService.signInWithGoogle(profile(), null);
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'cuber@example.com', password: 'a-long-enough-password' },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  /**
+   * ADR-0018 rule 3, now that verification exists. A verified password was proved by
+   * someone who both knew it and read the inbox, so it is a proved credential and the
+   * link has nothing to discard.
+   */
+  describe('when the password account has verified its email', () => {
+    async function registerAndVerify(): Promise<string> {
+      const cookie = await registerWithPassword();
+      const link = context.emails.sent.at(-1)?.text ?? '';
+      const token = /#token=([\w-]+)/u.exec(link)?.[1] ?? '';
+
+      const response = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/verify-email',
+        payload: { token },
+        cookies: { [SESSION_COOKIE]: cookie },
+      });
+      expect(response.statusCode).toBe(200);
+      return cookie;
+    }
+
+    it('keeps the password', async () => {
+      await registerAndVerify();
+
+      const { user } = await authService.signInWithGoogle(profile(), null);
+      expect(user.passwordHash).not.toBeNull();
+
+      const login = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { email: 'cuber@example.com', password: 'a-long-enough-password' },
+      });
+      expect(login.statusCode).toBe(200);
+    });
+
+    /** Every session was started by someone holding the proved password. */
+    it('keeps the sessions that already existed', async () => {
+      const cookie = await registerAndVerify();
+
+      await authService.signInWithGoogle(profile(), null);
+
+      expect((await me(cookie)).statusCode).toBe(200);
+    });
+  });
+
+  it('still clears a password whose email was never verified', async () => {
+    const cookie = await registerWithPassword();
+
+    const { user } = await authService.signInWithGoogle(profile(), null);
+
+    expect(user.passwordHash).toBeNull();
+    expect((await me(cookie)).statusCode).toBe(401);
   });
 
   it('keeps the original display name when linking', async () => {
@@ -131,6 +249,24 @@ describe('signing in with Google', () => {
 
     const user = await context.prisma.user.findFirstOrThrow();
     expect(user.googleId).toBeNull();
+  });
+
+  /**
+   * A recycled address. A workspace administrator can hand an email to someone new, who
+   * gets a different Google subject. Linking by email would give them the previous
+   * holder's account; ADR-0013 matches on subject precisely so that cannot happen.
+   */
+  it('refuses a second Google account arriving with an already-linked email', async () => {
+    const original = await authService.signInWithGoogle(profile({ sub: 'subject-1' }), null);
+
+    await expect(
+      authService.signInWithGoogle(profile({ sub: 'subject-2' }), null),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'GOOGLE_ACCOUNT_MISMATCH' });
+
+    const user = await context.prisma.user.findUniqueOrThrow({ where: { id: original.user.id } });
+    expect(user.googleId).toBe('subject-1');
+    expect(await context.prisma.user.count()).toBe(1);
+    expect(await context.prisma.authSession.count()).toBe(1);
   });
 
   /** Matching on the subject, not the email, so a reassigned address cannot hijack a login. */

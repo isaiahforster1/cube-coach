@@ -75,7 +75,15 @@ describe('LoginPage', () => {
     const fetchMock = mockApi({
       ok: true,
       status: 200,
-      body: { user: { id: '1', email: 'cuber@example.com', displayName: 'C', createdAt: '' } },
+      body: {
+        user: {
+          id: '1',
+          email: 'cuber@example.com',
+          displayName: 'C',
+          emailVerified: true,
+          createdAt: '',
+        },
+      },
     });
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);

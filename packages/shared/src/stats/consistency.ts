@@ -34,8 +34,15 @@ export function summariseConsistency(solves: readonly SolveLike[]): ConsistencyS
   }
 
   const mean = times.reduce((sum, value) => sum + value, 0) / times.length;
-  const best = Math.min(...times);
-  const worst = Math.max(...times);
+
+  // A loop rather than `Math.min(...times)`. Spreading passes every element as its own
+  // argument on the call stack, which overflows somewhere past a hundred thousand.
+  let best = times[0] ?? 0;
+  let worst = best;
+  for (const time of times) {
+    if (time < best) best = time;
+    if (time > worst) worst = time;
+  }
 
   /**
    * Population standard deviation, not the sample estimate.

@@ -236,6 +236,62 @@ describe('one user cannot reach another user’s data', () => {
     const untouched = await context.prisma.solve.findFirstOrThrow();
     expect(untouched.deletedAt).toBeNull();
   });
+
+  /**
+   * Idempotent create looks the row up by id alone, so a second request with the same id
+   * gets the stored row back. That is right for a retry by the same user and a leak for
+   * anyone else: it returned the other user's whole solve, comment included.
+   */
+  it('refuses to create a solve with an id another user already holds', async () => {
+    const created = await postSolve(
+      solvePayload({ durationMs: 9_876, comment: 'private note from the owner' }),
+    );
+    const other = await registerOtherUser();
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/solves',
+      cookies: { [SESSION_COOKIE]: other.cookie },
+      payload: solvePayload({
+        id: created.json().solve.id,
+        practiceSessionId: other.practiceSessionId,
+      }),
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('SOLVE_ID_CONFLICT');
+    expect(response.body).not.toContain('private note from the owner');
+    expect(response.body).not.toContain('9876');
+    expect(response.body).not.toContain(practiceSessionId);
+
+    const untouched = await context.prisma.solve.findFirstOrThrow();
+    expect(untouched.comment).toBe('private note from the owner');
+    expect(await context.prisma.solve.count()).toBe(1);
+  });
+});
+
+/**
+ * A path parameter is input like any other. Unchecked, a malformed id reached Postgres,
+ * which refused it as a uuid, and the client saw a 500: a crash report for a typo, and a
+ * database error message in development.
+ */
+describe('malformed ids in the path', () => {
+  it.each([
+    ['PATCH', '/api/v1/solves/not-a-uuid', { penalty: 'dnf' }],
+    ['DELETE', '/api/v1/solves/not-a-uuid', undefined],
+    ['POST', '/api/v1/solves/not-a-uuid/restore', undefined],
+    ['DELETE', '/api/v1/practice-sessions/not-a-uuid', undefined],
+  ] as const)('%s %s is a 400', async (method, url, payload) => {
+    const response = await context.app.inject({
+      method,
+      url,
+      cookies: { [SESSION_COOKIE]: cookie },
+      ...(payload === undefined ? {} : { payload }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_FAILED');
+  });
 });
 
 describe('PATCH /solves/:id', () => {

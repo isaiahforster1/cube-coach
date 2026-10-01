@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Solve } from '@cube-coach/shared';
+import { MAX_SOLVES_PER_BATCH, type Solve } from '@cube-coach/shared';
 import { api } from '../../lib/api-client.js';
 import { useSession } from '../auth/use-session.js';
 import { clearGuestSolves, guestSolvesForUpload } from '../solves/guest-store.js';
@@ -41,10 +41,15 @@ export function useGuestMigration(): { status: MigrationStatus; migratedCount: n
 
     void (async () => {
       try {
-        for (const solve of pending) {
+        // Batches rather than one request per solve: the single-solve endpoint is
+        // limited to the pace of a person at a timer, and a stored history is not that.
+        for (let start = 0; start < pending.length; start += MAX_SOLVES_PER_BATCH) {
+          const batch = pending.slice(start, start + MAX_SOLVES_PER_BATCH);
           // The guest store uses a placeholder session id that does not exist on the
           // server, so each solve is re-pointed at the account's real one.
-          await api.post<{ solve: Solve }>('/solves', { ...solve, practiceSessionId });
+          await api.post<{ solves: Solve[] }>('/solves/batch', {
+            solves: batch.map((solve) => ({ ...solve, practiceSessionId })),
+          });
         }
 
         clearGuestSolves();

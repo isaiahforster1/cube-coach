@@ -3,6 +3,7 @@ import { Route, Routes } from 'react-router';
 import { AlgorithmsPage } from './features/algorithms/AlgorithmsPage.js';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { RegisterPage } from './features/auth/RegisterPage.js';
+import { VerifyEmailPage } from './features/auth/VerifyEmailPage.js';
 import { CubePlayground } from './features/cube/CubePlayground.js';
 import { HistoryPage } from './features/history/HistoryPage.js';
 import { SolverPage } from './features/solver/SolverPage.js';
@@ -29,6 +30,7 @@ export function App(): ReactElement {
 
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
 
       <Route
         path="*"

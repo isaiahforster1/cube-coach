@@ -24,13 +24,16 @@ const environmentSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
 
   /**
-   * Where the web client is served from.
+   * A web client on a different origin, allowed to call the API with credentials.
    *
-   * CORS must name this origin explicitly. The wildcard `*` is forbidden by the spec
-   * whenever credentials are involved, and our session cookie is a credential — a
-   * browser will refuse the response outright rather than sending the cookie.
+   * Only needed when the client and the API are served separately, which is development
+   * without the Vite proxy. In production they share one origin (ADR-0017), so this is
+   * normally unset there and no cross-origin access is granted at all.
+   *
+   * CORS must name the origin explicitly. The wildcard `*` is forbidden by the spec
+   * whenever credentials are involved, and our session cookie is a credential.
    */
-  WEB_ORIGIN: z.string().default('http://localhost:5173'),
+  WEB_ORIGIN: z.url().optional(),
 
   /**
    * Google sign-in credentials, all optional.
@@ -42,6 +45,22 @@ const environmentSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
+
+  /**
+   * Email through Resend, used for verification links. Optional: without it, development
+   * writes emails to the log, and production offers no verification (see ADR-0019).
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  /** The sender, on a domain verified in Resend, e.g. `CubeCoach <verify@mail.example>`. */
+  EMAIL_FROM: z.string().min(1).optional(),
+
+  /**
+   * The public address of the app, for building absolute links in emails.
+   *
+   * Configured rather than taken from the request's Host header, which the client
+   * controls: a link built from it would let anyone send our users to their own site.
+   */
+  APP_URL: z.url().optional(),
 
   /**
    * Where the built web client lives, for the production server that hosts both.
@@ -75,10 +94,52 @@ const environmentSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
-export type Config = z.infer<typeof environmentSchema>;
+/** Where Vite serves the client in development. */
+const DEVELOPMENT_WEB_ORIGIN = 'http://localhost:5173';
+
+/**
+ * Defaults that depend on the environment, applied after validation.
+ *
+ * The web origin default is for development only. It used to apply everywhere, so a
+ * production deploy that did not set the variable quietly allowed `localhost:5173` to
+ * make credentialed requests, and sent Google sign-ins there.
+ */
+const configSchema = environmentSchema
+  .superRefine((environment, context) => {
+    if (environment.RESEND_API_KEY !== undefined && environment.EMAIL_FROM === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['EMAIL_FROM'],
+        message: 'EMAIL_FROM is required when RESEND_API_KEY is set',
+      });
+    }
+    if (
+      environment.NODE_ENV === 'production' &&
+      environment.RESEND_API_KEY !== undefined &&
+      environment.APP_URL === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['APP_URL'],
+        message: 'APP_URL is required in production when email is configured',
+      });
+    }
+  })
+  .transform((environment) => {
+    const developmentDefault =
+      environment.NODE_ENV === 'production' ? undefined : DEVELOPMENT_WEB_ORIGIN;
+    return {
+      ...environment,
+      WEB_ORIGIN: environment.WEB_ORIGIN ?? developmentDefault,
+      // In development the app is reached through Vite, so that is where links point.
+      APP_URL: environment.APP_URL ?? developmentDefault,
+    };
+  });
+
+export type Config = z.infer<typeof configSchema>;
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
-  const result = environmentSchema.safeParse(source);
+  const result = configSchema.safeParse(source);
 
   if (!result.success) {
     const problems = result.error.issues

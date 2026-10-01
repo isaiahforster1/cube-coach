@@ -1,12 +1,17 @@
+import type { Writable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import type { TextModel } from '../ai/text-model.js';
 import { buildApp } from '../app.js';
 import { loadConfig } from '../config.js';
 import { createPrismaClient } from '../db.js';
+import type { GoogleOAuth } from '../modules/auth/google.js';
+import { createFakeEmailSender, type FakeEmailSender } from './fake-email-sender.js';
 
 export interface TestContext {
   readonly app: FastifyInstance;
+  /** Every email the application sent, recorded instead of delivered. */
+  readonly emails: FakeEmailSender;
   readonly prisma: PrismaClient;
   /** Empty every table, so each test starts from a known state. */
   reset(): Promise<void>;
@@ -18,12 +23,24 @@ export interface CreateTestContextOptions {
   readonly rateLimit?: {
     readonly max?: number;
     readonly credentialMax?: number;
+    readonly solveMax?: number;
+    readonly solveBatchMax?: number;
+    readonly verificationMax?: number;
+    readonly resendMax?: number;
     readonly solverMax?: number;
   };
   /** A directory of built client files, for the tests that cover serving them. */
   readonly webRoot?: string;
   /** Run as production would, for the headers that only appear there. */
   readonly production?: boolean;
+  /** A fake Google, which also switches the Google routes on. */
+  readonly google?: GoogleOAuth;
+  /** Replaces the fake that records email, e.g. to make sending fail. */
+  readonly emailSender?: FakeEmailSender;
+  /** Capture the application's logs, at info level, for tests about what gets logged. */
+  readonly logStream?: Writable;
+  /** Environment overrides; `undefined` removes a variable the local .env would set. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   /**
    * The explanation model. `null` by default, never the one from config: these tests load
    * the developer's `.env`, which may hold a real key, and a test must not spend its quota.
@@ -48,12 +65,15 @@ export async function createTestContext(
 
   const config = loadConfig({
     ...process.env,
+    ...options.env,
     NODE_ENV: options.production === true ? 'production' : 'test',
     DATABASE_URL: databaseUrl,
     // Tests should not print application logs unless something is being debugged.
-    LOG_LEVEL: process.env['TEST_LOG_LEVEL'] ?? 'silent',
+    LOG_LEVEL:
+      options.logStream === undefined ? (process.env['TEST_LOG_LEVEL'] ?? 'silent') : 'info',
   });
 
+  const emails = options.emailSender ?? createFakeEmailSender();
   const prisma = createPrismaClient(config.DATABASE_URL);
   const app = await buildApp({
     config,
@@ -63,18 +83,29 @@ export async function createTestContext(
     rateLimit: {
       max: options.rateLimit?.max ?? 100_000,
       credentialMax: options.rateLimit?.credentialMax ?? 100_000,
+      solveMax: options.rateLimit?.solveMax ?? 100_000,
+      solveBatchMax: options.rateLimit?.solveBatchMax ?? 100_000,
+      verificationMax: options.rateLimit?.verificationMax ?? 100_000,
+      resendMax: options.rateLimit?.resendMax ?? 100_000,
       solverMax: options.rateLimit?.solverMax ?? 100_000,
     },
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
+    ...(options.google === undefined ? {} : { google: options.google }),
+    // Always a fake: no test sends real mail, whatever the local .env configures.
+    emailSender: emails,
+    ...(options.logStream === undefined ? {} : { logStream: options.logStream }),
     textModel: options.textModel ?? null,
   });
   await app.ready();
 
   return {
+    emails,
     app,
     prisma,
 
     async reset(): Promise<void> {
+      emails.sent.length = 0;
+
       // Discovered rather than hard-coded, so a new table cannot be forgotten here and
       // silently leak rows between tests. The migrations table is left alone.
       const tables = await prisma.$queryRaw<{ tablename: string }[]>`

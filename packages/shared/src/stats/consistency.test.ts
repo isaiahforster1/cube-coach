@@ -89,4 +89,16 @@ describe('summariseConsistency', () => {
     expect(summary.dnfCount).toBe(2);
     expect(summary.solveCount).toBe(2);
   });
+
+  it('handles a history far larger than the call stack', () => {
+    const history: SolveLike[] = Array.from({ length: 200_000 }, (_, index) => ({
+      durationMs: 10_000 + (index % 5_000),
+      penalty: 'none',
+    }));
+
+    const summary = summariseConsistency(history);
+
+    expect(summary.bestMs).toBe(10_000);
+    expect(summary.worstMs).toBe(14_999);
+  });
 });
