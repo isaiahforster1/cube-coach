@@ -51,4 +51,4 @@ reversal destroys the only thing this directory is for.
 | [0020](0020-whole-cube-rotations.md)                    | Whole-cube rotations are a separate kind of move          | Accepted                                                    |
 | [0021](0021-step-solver.md)                             | The step solver searches in a fixed frame                 | Accepted                                                    |
 | [0022](0022-step-explanation-agent.md)                  | A model rewrites the engine's facts, behind a port        | Accepted, amended by [0023](0023-explanation-fact-check.md) |
-| [0023](0023-explanation-fact-check.md)                  | A deterministic fact check after the notation gate        | Proposed                                                    |
+| [0023](0023-explanation-fact-check.md)                  | A deterministic fact check after the notation gate        | Accepted                                                    |

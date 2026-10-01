@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed — 2026-09-30. Implemented on `feat/solve-explanations` so it could be measured
-on real replies. The product owner accepts it or asks for changes.
+Accepted — 2026-10-01 (proposed 2026-09-30), after a second round of move-role rules and
+a fresh measurement on seed 2028 (§5).
 
 Amends [ADR-0022](0022-step-explanation-agent.md), whose "Honest limits" named this as
 the next step. ADR-0022 is otherwise unchanged.
@@ -59,8 +59,24 @@ The last row goes one step past colours, places and counts. It is a claim about 
 step's own notation, which the gate lets through because every move in it is real. It is
 here because the development corpus (§5) showed that this, and not a wrong number, is how
 ADR-0022's first finding actually appears: "Then R U2 R' joins the corner and edge after
-four moves", where the count is right and the four moves are `R U2 R' F'`. A run of moves
-said to do both, or one naming every move of the step, is a summary and is not checked.
+four moves", where the count is right and the four moves are `R U2 R' F'`.
+
+What a run of moves does is read from the words around it:
+
+- **The verb after it**, up to the next run: "R U2 R' joins them". Or, when the run is
+  named with "using", "with", "by" or "via", **the verb before it** in the same clause:
+  "they are joined after 2 moves using F' L". "Pairs" and "connects" read as joining;
+  "the joined pair" and "use L to start joining" do not, because both are true of any
+  move.
+- **"The remaining moves" or "leaving us with"** right before a run names it as the
+  insert, even when it names every move.
+- **A run said to join and insert** must run to the end of the step and start no later
+  than the move that joins the pair. "U2 sets them up, then F' U' F joins and inserts
+  them" is true when `F'` joins them.
+
+A run naming every move of the step with only one verb is a summary and is not checked.
+The facts call the whole pair step its insert (`insertLength`), so "R U R' U' finishes
+the insert" is true in their own words.
 
 **The numbers a fact allows** include the arithmetic a reader would accept as the same
 fact. A pair that joins after 3 of 7 moves allows 3, 7 and 4 ("the last 4 moves"). A cross
@@ -170,10 +186,65 @@ pointed at the wrong words.
 - the whole step handed to one part: "the remaining moves U2 R F R F' R'", "leaving us
   with F' U2 F U F' U' F", "U L F' U' F L' are used to complete the insert".
 
-Each has an obvious rule: read the verb on either side of a run, require a run that both
-joins and inserts to be the whole step exactly, and treat "the remaining moves" as the
-insert. They were found on this corpus, so they are not added here. Adding them means
-measuring again on a third seed, which is the product owner's call.
+#### Second round: the move-role rules, measured on seed 2028
+
+The product owner asked for the rules these misses suggest, and a fresh measurement.
+Replaying both saved corpora while writing them showed the rules as first proposed were
+too tight in two places:
+
+- **"Both join and insert" cannot mean "the whole step exactly".** "U2 sets up the
+  pieces before F' U' F joins and inserts them" is true when `F'` makes the pair. The rule
+  became: a run said to do both must run to the end of the step, starting no later than
+  the joining move.
+- **"The remaining moves" only names a run right before it.** In "the remaining moves
+  finish the insert using y' U R' F R F2 U' F", the run is how the insert is done, and the
+  facts call the whole step the insert.
+
+They also showed that one of the five misses cannot be caught by a rule: "Then U L F' U'
+F L' are used to complete the insert" names every move with one verb, exactly as the true
+summaries do ("Finish the insert with F' U2 F U F' U2 F"). It stays a summary, and is
+listed under the limits below. "The joined pair" and "use L to start joining" were taken
+out of the join verbs, and "pairs" and "connects" added, so the logged reason names the
+claim that was wrong.
+
+On the saved corpora the check now fires on 3 of 100 (dev, unchanged) and 11 of 96 (seed
+2027): the 7 it caught before, all now logged with the claim that was wrong, and 4 of the
+5 misses.
+
+Run on 2026-10-01, the same model, prompt and settings, on seed 2028. Each contradicted
+reply, and the move-role claims of each passing one, were read by hand against the facts.
+
+| Measure                        | Result                                                 |
+| ------------------------------ | ------------------------------------------------------ |
+| Steps                          | 99 (94 answered, 5 timed out at the 6-second deadline) |
+| Refused by the notation gate   | 0                                                      |
+| Contradicted by the fact check | **8 (8.5% of answered)**, all on move role             |
+| … of those, really wrong       | **7 of 8.** One true reply was refused (below)         |
+| … logged reason exactly right  | 7 of 7                                                 |
+| Passed                         | 86. No wrong move role among them                      |
+| Latency per call               | median 778 ms, p95 2,780 ms                            |
+
+The wrong replies it caught: runs one or two moves off the join (four), a run said to
+join and insert that drops the last move, and two that write a move wrong (`U R R'` for
+`U R'`, and the whole step with `F` for its last `F'`). Replayed, the check before this
+round catches 5 of these 7. The new rules catch the other two.
+
+**The false refusal.** "We use U R F R' F' to join them after 5 moves and place them in
+the slot with R'" is true. Reading the verb before "with R'" went back across "and" to
+"join", so `R'` was read as a join claim. The before-verb is now read only within its own
+clause, which ends at "and" unless the "and" follows a joining verb ("join and insert
+them using …"). Replayed, seed 2028 fires on the 7 really wrong replies and nothing else,
+and the other two corpora are unchanged.
+
+That fix was made after reading seed 2028, so 7 of 94 is a fitted number, as 3 of 100
+was for the dev corpus. The honest measured rate for this round is the table above: 1
+false refusal in 94. As ADR-0021 and ADR-0022 do for the gate, the explainer's
+`contradicted` warnings are the ongoing measurement; a fourth seed is only worth spending
+quota on if the rules change again.
+
+Across 290 replies on three seeds, the model has still made no wrong colour, place or
+count claim that the check or a reader found. (For seed 2028, colours, places and counts
+were left to the check rather than read by hand.)
 
 ## Consequences
 
@@ -198,6 +269,14 @@ nothing but the template test and a live measurement shows which.
   catch the same mistake when the moves are named.
 - Claims about why ("because it is the shortest") are not checked, beyond the counts in
   them. Nor are claims about twist, sticker facing, or what a single move does.
+- A run naming every move of a pair step with one verb is taken as a summary, because the
+  facts call the whole step the insert. So "they join after 3 moves. Then U L F' U' F L'
+  complete the insert", which hands the whole step to the insert, passes. Only the
+  sentence before it shows that it is wrong, and the check reads runs one sentence at a
+  time.
+- The verbs that name a run's job are a list ("join", "connect", "insert", "finish",
+  "complete", …). "Place them in the slot" is not on it, so a run named that way is not
+  checked.
 
 ## Alternatives considered
 

@@ -2962,10 +2962,27 @@ gets a fact wrong is reported as the stronger failure.
 
 Replies often name the whole sequence and say it "joins the corner and edge and inserts
 the pair". That's a summary, and it's true. Checking it like a claim about the first part
-of the step would refuse good text. But the exemption is a gap: "R U F R F' R join them
-and insert", with `R` written where the step has `R'`, passed because of it. A rule always
-trades a kind of false alarm for a kind of miss, and the measurement is what tells you
-which trade you made.
+of the step would refuse good text. The first version exempted any run said to do both,
+and "R U F R F' R join them and insert" got through, with `R` written where the step has
+`R'`. The obvious fix, "a run said to do both must be the whole step", was too tight:
+"U2 sets them up, then F' U' F joins and inserts them" is true when `F'` makes the pair.
+The rule that held up on real replies is "it must run to the end of the step, starting no
+later than the joining move". A rule always trades a kind of false alarm for a kind of
+miss, and replaying saved replies is what tells you which trade you made before you spend
+quota finding out live.
+
+### The fix for a false alarm was found on the measurement run. Why not just report the fixed number?
+
+Seed 2028 was the fresh test set for the second round of rules. It found one true reply
+refused, because "with R'" was read with the "join" earlier in the sentence. The fix is
+clearly right, and replayed, 2028 then shows only real errors. But that clean number is
+fitted: the rule was changed after looking at those replies. So the ADR reports what the
+run measured (1 false refusal in 94) and calls the replayed number fitted. After that,
+production logs are the ongoing test set, and a fourth seed is only worth spending if the
+rules change again.
+
+> "Once you've tuned on a test set, it's a training set. Report the number from before
+> the fix."
 
 ### Questions to answer out loud, without notes
 
