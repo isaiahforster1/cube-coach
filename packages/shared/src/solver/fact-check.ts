@@ -471,6 +471,14 @@ function checkCrossEdges(reader: Reader) {
   }
 }
 
+/**
+ * Words that make a clause about where a piece goes, not where it is: "the corner goes in
+ * the front right slot" is true of every pair, since every pair is inserted at front right.
+ * "Place" as a noun is left out, so "the corner is already in place at back left" is read.
+ */
+const DESTINATION =
+  /\binto\b|\bto\s+(?:the|front|back)\b|\bpair\b|\b(?:go|goes|going|gone|went|belongs?|belonging|heads?|heading|lands?|landing|ends?\s+up|placed|placing|put|puts|putting|inserted|inserting|inserts?)\b/u;
+
 /** "the corner is in the top layer at back left", in a clause that names only the corner. */
 function checkPiecePlaces(reader: Reader) {
   const { corner, edge } = reader.allowed;
@@ -481,8 +489,8 @@ function checkPiecePlaces(reader: Reader) {
   );
   for (const clause of clauses) {
     const names = { corner: /\bcorner\b/u.test(clause), edge: /\bedge\b/u.test(clause) };
-    // Only where a piece is, not where it goes: "into" or "to the" is a destination.
-    if (names.corner === names.edge || /\binto\b|\bto\s+the\b|\bpair\b/u.test(clause)) continue;
+    // Only where a piece is, not where it goes.
+    if (names.corner === names.edge || DESTINATION.test(clause)) continue;
     const piece = names.corner ? corner : edge;
     const which = names.corner ? 'corner' : 'edge';
     const fact = `${which}: ${piece.layer} layer${piece.slot ? `, ${piece.slot}` : ''}${piece.side ? `, ${piece.side}` : ''}`;

@@ -211,6 +211,23 @@ describe('where the corner and edge start', () => {
   it('does not read where a piece goes as where it is', () => {
     expect(kinds('The edge drops into the front right slot.', FIRST_PAIR)).toEqual([]);
     expect(kinds('The corner and edge are at front right at the end.', FIRST_PAIR)).toEqual([]);
+    // Every pair is inserted at front right, so these are true of every pair step.
+    for (const text of [
+      'The corner goes in the front right slot.',
+      'The corner belongs in front right.',
+      'The edge needs to go to front right.',
+      'The corner ends up at front right.',
+      'The edge is placed at front right.',
+    ]) {
+      expect(kinds(text, FIRST_PAIR)).toEqual([]);
+    }
+  });
+
+  it('still reads "in place" as where a piece is', () => {
+    // The corner starts above back right.
+    expect(kinds('The corner is already in place at front left.', FIRST_PAIR)).toEqual([
+      'piece-place',
+    ]);
   });
 });
 
