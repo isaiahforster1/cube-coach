@@ -164,6 +164,8 @@ export function createStepExplainer(options: StepExplainerOptions): StepExplaine
           prompt,
           maxTokens: MAX_TOKENS,
           signal: AbortSignal.timeout(timeoutMs),
+          // A retry is a second request to the provider's quota, so it spends the cap too.
+          mayRetry: () => budget.take(),
         });
       } catch (error) {
         log.warn(

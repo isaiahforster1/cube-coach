@@ -20,6 +20,12 @@ export interface TextModelRequest {
    * reject with a `TextModelError` of kind `timeout`.
    */
   readonly signal: AbortSignal;
+  /**
+   * Asked before any retry, which is another request to the provider. `false` means fail
+   * with the first error instead. A caller that budgets requests spends one here, so a
+   * retry counts against its cap like the first attempt did. Left out, retries are allowed.
+   */
+  readonly mayRetry?: () => boolean;
 }
 
 /**

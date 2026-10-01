@@ -2842,10 +2842,12 @@ They have not been explained back yet.
    with it. Not counting failures would also mean unlimited calls during an outage, which
    is exactly when calling again helps least. A cache hit makes no request, so counting it
    would spend the cap on nothing. The lookup also comes before the budget check, so after
-   the cap is reached, steps already in the cache still get model text. One gap: the
-   budget is taken once per step, but the adapter may retry a 5xx. One unit of the cap can
-   then be two requests to the quota. In a long 5xx outage, 450 counted calls could be up
-   to 900 requests. The quota still stops it at no charge.
+   the cap is reached, steps already in the cache still get model text. A retry counts too:
+   the adapter retries a 5xx, and that is a second request to the quota, so the request
+   carries `mayRetry`, which the explainer answers by taking from the budget. Without it,
+   one unit of the cap could be two requests, and in a long 5xx outage 450 counted calls
+   could be up to 900. The callback keeps the retry policy in the adapter and the budget
+   in the agent, without either knowing how the other works.
 2. **Two identical requests at once.** Both miss the cache, both take from the budget, and
    both call the model. That is ten calls for one five-step solve, possibly with different
    wording, and the last one written wins the cache entry. This is a cache stampede. The

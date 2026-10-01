@@ -186,7 +186,8 @@ So three limits apply:
 - **Global:** `EXPLANATION_DAILY_CALL_CAP` model calls per process per UTC day. Once it is
   reached, every request gets the template until midnight UTC, and one `warn` is logged
   when the cap is hit. Cache hits do not count toward it. Failed calls do, because the
-  provider counts them too.
+  provider counts them too, and so does the adapter's retry (§6), which the adapter asks
+  the agent for through the request's `mayRetry`.
 - **Provider side:** the free tier's own quota (decision D). The cap sits just under it, so
   the app falls back by its own rule instead of collecting 429s, and if the cap were wrong
   the quota still stops it at no charge.

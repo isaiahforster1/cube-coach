@@ -188,6 +188,25 @@ describe('the step explainer', () => {
     expect(capWarnings[0]?.details['dailyCallCap']).toBe(2);
   });
 
+  it('counts an adapter retry toward the cap, and refuses one when the cap is spent', async () => {
+    // Stands in for an adapter that retries a 5xx: it asks, then fails either way.
+    const allowed: boolean[] = [];
+    const model = createFakeTextModel((request) => {
+      allowed.push(request.mayRetry?.() ?? true);
+      return new TextModelError('unavailable', 'down', 503);
+    });
+    const explainer = createStepExplainer({ model, dailyCallCap: 3, timeoutMs: 50 });
+    const { log } = recordingLog();
+
+    await explainer.explain(PAIR, { index: 0, log });
+    await explainer.explain(PAIR, { index: 0, log });
+    await explainer.explain(PAIR, { index: 0, log });
+
+    // Call, retry (2 of 3), call (3 of 3), retry refused, then no call at all.
+    expect(allowed).toEqual([true, false]);
+    expect(model.requests).toHaveLength(2);
+  });
+
   it('does not count cache hits toward the cap', async () => {
     const { explain, model } = setup(() => goodText(CROSS), { cap: 1 });
     for (let i = 0; i < 3; i += 1) expect((await explain(CROSS)).source).toBe('model');

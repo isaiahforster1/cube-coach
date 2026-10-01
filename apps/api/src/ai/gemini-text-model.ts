@@ -124,9 +124,11 @@ export function createGeminiTextModel(options: GeminiTextModelOptions): TextMode
       } catch (error) {
         // One retry, only for a failure that might not happen twice, and only while the
         // caller's deadline has time left. A 429 is not retried: on a free tier it usually
-        // means the quota is spent, and asking again spends more of it (ADR-0022 §6).
+        // means the quota is spent, and asking again spends more of it (ADR-0022 §6). The
+        // caller is asked last, so it is only charged for a retry that will be sent.
         const retryable = error instanceof TextModelError && error.kind === 'unavailable';
         if (!retryable || request.signal.aborted) throw error;
+        if (request.mayRetry !== undefined && !request.mayRetry()) throw error;
         return attempt(request);
       }
     },

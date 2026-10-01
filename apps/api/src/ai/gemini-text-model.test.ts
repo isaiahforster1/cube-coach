@@ -143,6 +143,31 @@ describe('the Gemini adapter', () => {
     expect(sent).toHaveLength(2);
   });
 
+  it('asks before retrying, and does not retry when the caller says no', async () => {
+    const asked: boolean[] = [];
+    const ask = (answer: boolean) => () => {
+      asked.push(answer);
+      return answer;
+    };
+
+    const refused = stub(json({}, 503), reply([{ text: 'x' }]));
+    const noRetry = createGeminiTextModel({ apiKey: 'k', model: 'm', fetch: refused.fetch });
+    const error = await failure(noRetry.generate({ ...request(), mayRetry: ask(false) }));
+    expect(error.kind).toBe('unavailable');
+    expect(refused.sent).toHaveLength(1);
+
+    const allowed = stub(json({}, 503), reply([{ text: 'Second time.' }]));
+    const retry = createGeminiTextModel({ apiKey: 'k', model: 'm', fetch: allowed.fetch });
+    expect(await retry.generate({ ...request(), mayRetry: ask(true) })).toBe('Second time.');
+    expect(allowed.sent).toHaveLength(2);
+
+    // Never asked about a failure it would not retry anyway.
+    const limited = stub(json({}, 429));
+    const noAsk = createGeminiTextModel({ apiKey: 'k', model: 'm', fetch: limited.fetch });
+    await failure(noAsk.generate({ ...request(), mayRetry: ask(true) }));
+    expect(asked).toEqual([false, true]);
+  });
+
   it('does not keep the original network error, which could describe the request', async () => {
     const { fetch } = stub(new TypeError('fetch failed for key k'), new TypeError('again k'));
     const model = createGeminiTextModel({ apiKey: 'k', model: 'm', fetch });
