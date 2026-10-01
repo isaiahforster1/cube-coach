@@ -33,6 +33,30 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...valid, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/u);
   });
 
+  it('leaves the explanation model off unless a key is set, and an empty key counts as unset', () => {
+    expect(loadConfig(valid).GEMINI_API_KEY).toBeUndefined();
+    expect(loadConfig({ ...valid, GEMINI_API_KEY: '' }).GEMINI_API_KEY).toBeUndefined();
+    expect(loadConfig({ ...valid, GEMINI_API_KEY: 'k' }).GEMINI_API_KEY).toBe('k');
+  });
+
+  it('defaults the explanation model and its daily cap', () => {
+    const config = loadConfig(valid);
+    expect(config.EXPLANATION_MODEL).toBe('gemini-3.5-flash-lite');
+    expect(config.EXPLANATION_DAILY_CALL_CAP).toBe(450);
+    expect(
+      loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '20' }).EXPLANATION_DAILY_CALL_CAP,
+    ).toBe(20);
+  });
+
+  it('rejects a negative or fractional daily cap', () => {
+    expect(() => loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '-1' })).toThrow(
+      /EXPLANATION_DAILY_CALL_CAP/u,
+    );
+    expect(() => loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '2.5' })).toThrow(
+      /EXPLANATION_DAILY_CALL_CAP/u,
+    );
+  });
+
   it('rejects an unknown log level', () => {
     expect(() => loadConfig({ ...valid, LOG_LEVEL: 'chatty' })).toThrow(/LOG_LEVEL/u);
   });
