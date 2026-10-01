@@ -2593,9 +2593,10 @@ is no second copy of the state that could fall out of sync.
 
 ## Designing the explanation agent (solve coaching, part 9)
 
-The design is in [ADR-0022](architecture/0022-step-explanation-agent.md), which is still
-Proposed. These questions are about the design, before any code exists. Answers are added
-here as they are worked out.
+The design is in [ADR-0022](architecture/0022-step-explanation-agent.md). These questions
+were written while it was Proposed, against a paid Anthropic adapter. It was accepted with
+Gemini's free tier instead (part 10). The questions still stand: read "spend" as "quota"
+where the free tier changes the meaning. Answers are added here as they are worked out.
 
 ### Questions to answer out loud, without notes
 
@@ -2605,7 +2606,8 @@ here as they are worked out.
   would catch a stray `F` anyway. Why prevent it in the prompt as well, and what would the
   refusal rate tell you if you didn't?
 - The adapter is given the key explicitly and ignores the SDK's own credential lookup. What
-  goes wrong on a developer's laptop if it doesn't?
+  goes wrong on a developer's laptop if it doesn't? (The Gemini adapter uses `fetch`, which
+  has no lookup at all. Which rule in §4 does that make easier to keep?)
 - The cache key is a hash of the built prompt, not the scramble. Give a case where two
   different scrambles share an entry. What would have to change for that to be wrong?
 - Why are refused and failed replies not cached? What would caching a failure cost, and
@@ -2621,3 +2623,71 @@ here as they are worked out.
   still wrong, and say how you would catch it without a second model.
 - One call per step costs more input tokens than one call per solve. Defend that choice
   to someone who only cares about the bill.
+
+## Building the explanation agent (solve coaching, part 10)
+
+[ADR-0022](architecture/0022-step-explanation-agent.md) was accepted with one change from
+the proposal. The product owner ruled out paid calls, then ruled out a local model because
+it only works while their computer is on. That left a hosted free tier: Gemini
+Flash-Lite, with a key from a Google Cloud project that has no billing linked.
+
+### Why did changing provider touch only one file of the design?
+
+The design was written against the port, not the provider. The prompt builder, the gate,
+the cache, the cap and the logs all talk to `TextModel`, which takes text and returns text.
+The decisions that changed (the adapter, the variables, the cap) are the ones about the
+provider. Everything about explaining steps stayed the same. That is the test of a port: a
+change of vendor costs an adapter and some configuration, not a redesign.
+
+### Why `fetch` here, when the proposal justified an SDK?
+
+The SDK was justified by typed errors and tested retries for a paid API. Here the adapter
+sends one kind of request, the failures that matter are a handful of statuses and reply
+shapes, and the retry policy is deliberately narrower than any SDK's default. About 80
+lines with their own tests replace a dependency. The reason for a dependency has to be
+true for this provider, not the one in the draft.
+
+### What actually stops a bill?
+
+Not the code. The daily cap counts per process and can be wrong. The real limit is that
+the key's project has no billing account, so past the quota Google refuses the call with a
+429 and cannot charge anything. The cap sits just under that quota so the app falls back
+by its own rule, and the quota is the backstop the cap cannot get wrong. The danger is
+quiet: linking billing to that project for any other reason moves the key to a paid tier.
+
+### Why is a 429 not retried, when a 503 is?
+
+A retry makes sense when the failure might not happen twice. A 503 is a server having a
+bad moment. On a free tier a 429 usually means the quota for the minute or the day is
+spent, so asking again fails again and uses more of it. The retry also shares the step's
+one deadline, so it can never make the route slower than six seconds.
+
+### Why does the test context pass `null`, when config already says "no key, no model"?
+
+The tests load the developer's `.env`, and that file now holds a real key. If the test
+context took the model from config, every API test run would call Gemini and spend the
+day's quota. So the default is `null`, and a test that wants a model passes a fake. Only
+the opt-in live measurement uses the real key.
+
+### How does a `Map` make an LRU cache?
+
+A `Map` iterates in insertion order. Reading an entry deletes it and sets it again, which
+moves it to the end. So the first key is always the least recently used one, and evicting
+is deleting `keys().next()`. No linked list or library needed, and every operation is
+constant time.
+
+### Questions to answer out loud, without notes
+
+- The cap counts failed calls but not cache hits. Justify both halves.
+- Two identical requests arrive at the same moment, before either has filled the cache.
+  How many model calls happen? Is that worth fixing, and how would you?
+- The model id is pinned (`gemini-3.5-flash-lite`), not `gemini-flash-latest`. What does
+  pinning protect, and what does it cost you over a year?
+- The adapter drops the original network error instead of keeping it as `cause`. What
+  could that error contain, and what do you lose by dropping it?
+- A free tier can change its limits or disappear. Walk through what a user sees on the
+  solver page the day it does, and what you would change.
+- The explainer's tests use a fake model, and the route test uses the same fake. What
+  would a bug in the fake hide, and what catches the real adapter's mistakes instead?
+- The live measurement calls the adapter directly, not the explainer. Why would measuring
+  through the explainer give a misleading refusal rate?
