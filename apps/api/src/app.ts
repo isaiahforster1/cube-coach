@@ -251,13 +251,18 @@ export async function buildApp({
     app.log.info('No explanation model configured; solver steps are explained by the template');
   } else {
     app.log.info(
-      { model: textModel.id, dailyCallCap: config.EXPLANATION_DAILY_CALL_CAP },
+      {
+        model: textModel.id,
+        dailyCallCap: config.EXPLANATION_DAILY_CALL_CAP,
+        clientDailyCallCap: config.EXPLANATION_CLIENT_DAILY_CALL_CAP,
+      },
       'Explanation model configured',
     );
   }
   const stepExplainer = createStepExplainer({
     model: textModel,
     dailyCallCap: config.EXPLANATION_DAILY_CALL_CAP,
+    clientDailyCallCap: config.EXPLANATION_CLIENT_DAILY_CALL_CAP,
   });
 
   const practiceSessionsRepository = createPracticeSessionsRepository(prisma);

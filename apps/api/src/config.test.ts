@@ -120,6 +120,21 @@ describe('loadConfig', () => {
     );
   });
 
+  it('defaults the per-client daily cap, reading blank as the default', () => {
+    const cap = (value?: string) =>
+      loadConfig({ ...valid, EXPLANATION_CLIENT_DAILY_CALL_CAP: value })
+        .EXPLANATION_CLIENT_DAILY_CALL_CAP;
+    expect(cap()).toBe(50);
+    expect(cap('')).toBe(50);
+    expect(cap('5')).toBe(5);
+  });
+
+  it.each(['0', '-1', '2.5'])('rejects a per-client daily cap of %s', (value) => {
+    expect(() => loadConfig({ ...valid, EXPLANATION_CLIENT_DAILY_CALL_CAP: value })).toThrow(
+      /EXPLANATION_CLIENT_DAILY_CALL_CAP/u,
+    );
+  });
+
   it('rejects an unknown log level', () => {
     expect(() => loadConfig({ ...valid, LOG_LEVEL: 'chatty' })).toThrow(/LOG_LEVEL/u);
   });

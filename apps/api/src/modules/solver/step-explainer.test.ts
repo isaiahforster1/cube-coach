@@ -38,19 +38,24 @@ function recordingLog() {
   return { log, entries };
 }
 
+const ALICE = 'user:alice';
+const BOB = 'user:bob';
+
 function setup(
   reply: (prompt: string) => FakeReply,
-  options: { cap?: number; now?: () => Date } = {},
+  options: { cap?: number; clientCap?: number; now?: () => Date } = {},
 ) {
   const model = createFakeTextModel((request) => reply(request.prompt));
   const explainer = createStepExplainer({
     model,
     dailyCallCap: options.cap ?? 100,
+    clientDailyCallCap: options.clientCap ?? 100,
     timeoutMs: 50,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const { log, entries } = recordingLog();
-  const explain = (step: StepToExplain, index = 0) => explainer.explain(step, { index, log });
+  const explain = (step: StepToExplain, index = 0, client: string | null = ALICE) =>
+    explainer.explain(step, { index, log, client });
   return { model, explain, entries };
 }
 
@@ -195,15 +200,112 @@ describe('the step explainer', () => {
       allowed.push(request.mayRetry?.() ?? true);
       return new TextModelError('unavailable', 'down', 503);
     });
-    const explainer = createStepExplainer({ model, dailyCallCap: 3, timeoutMs: 50 });
+    const explainer = createStepExplainer({
+      model,
+      dailyCallCap: 3,
+      clientDailyCallCap: 100,
+      timeoutMs: 50,
+    });
     const { log } = recordingLog();
 
-    await explainer.explain(PAIR, { index: 0, log });
-    await explainer.explain(PAIR, { index: 0, log });
-    await explainer.explain(PAIR, { index: 0, log });
+    await explainer.explain(PAIR, { index: 0, log, client: ALICE });
+    await explainer.explain(PAIR, { index: 0, log, client: ALICE });
+    await explainer.explain(PAIR, { index: 0, log, client: ALICE });
 
     // Call, retry (2 of 3), call (3 of 3), retry refused, then no call at all.
     expect(allowed).toEqual([true, false]);
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it('counts an adapter retry toward the client’s cap too', async () => {
+    const allowed: boolean[] = [];
+    const model = createFakeTextModel((request) => {
+      allowed.push(request.mayRetry?.() ?? true);
+      return new TextModelError('unavailable', 'down', 503);
+    });
+    const explainer = createStepExplainer({
+      model,
+      dailyCallCap: 100,
+      clientDailyCallCap: 3,
+      timeoutMs: 50,
+    });
+    const { log } = recordingLog();
+
+    for (let i = 0; i < 3; i += 1) await explainer.explain(PAIR, { index: 0, log, client: ALICE });
+    expect(allowed).toEqual([true, false]);
+
+    // Bob's allowance is separate: the call and its retry both go ahead.
+    await explainer.explain(PAIR, { index: 0, log, client: BOB });
+    expect(allowed).toEqual([true, false, true]);
+  });
+
+  it('gives a guest the template without calling the model, even for a cached step', async () => {
+    const { explain, model, entries } = setup(() => goodText(CROSS));
+    expect((await explain(CROSS)).source).toBe('model');
+
+    expect(await explain(CROSS, 0, null)).toEqual({
+      source: 'template',
+      text: template(CROSS),
+      reason: 'no-model',
+    });
+    expect(await explain(PAIR, 0, null)).toMatchObject({ source: 'template' });
+    expect(model.requests).toHaveLength(1);
+    expect(entries).toEqual([]);
+  });
+
+  it('stops calling the model for one client at its cap, warning once, while others go on', async () => {
+    const { explain, model, entries } = setup(() => REFUSED, { clientCap: 2 });
+    for (let i = 0; i < 4; i += 1) await explain(PAIR, 0, ALICE);
+    expect(model.requests).toHaveLength(2);
+
+    // Bob is not held back by Alice, and the calls Alice was refused cost Bob nothing.
+    for (let i = 0; i < 2; i += 1) await explain(PAIR, 0, BOB);
+    expect(model.requests).toHaveLength(4);
+
+    const capWarnings = entries.filter((entry) => entry.message.includes('client daily cap'));
+    expect(capWarnings).toHaveLength(1);
+    expect(capWarnings[0]?.details).toMatchObject({ clientDailyCallCap: 2 });
+    expect(JSON.stringify(entries)).not.toContain('alice');
+  });
+
+  it('spends nothing from the global cap on a call the client cap refuses', async () => {
+    const { explain, model } = setup(() => REFUSED, { cap: 2, clientCap: 1 });
+    await explain(PAIR, 0, ALICE);
+    await explain(PAIR, 0, ALICE); // refused by Alice's cap
+    await explain(PAIR, 0, ALICE); // and again
+    await explain(PAIR, 0, BOB); // the global cap still has room for Bob
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it('warns about the global cap, not the client’s, when the global cap refuses', async () => {
+    const { explain, entries } = setup(() => REFUSED, { cap: 1, clientCap: 5 });
+    await explain(PAIR, 0, ALICE);
+    await explain(PAIR, 0, BOB);
+    await explain(PAIR, 0, ALICE);
+
+    const capMessages = entries
+      .map((entry) => entry.message)
+      .filter((message) => message.includes('daily cap'));
+    expect(capMessages).toEqual(['Explanation model daily cap reached; using the template']);
+  });
+
+  it('does not count cache hits toward the client’s cap', async () => {
+    const { explain, model } = setup(() => goodText(CROSS), { clientCap: 1 });
+    for (let i = 0; i < 3; i += 1) expect((await explain(CROSS)).source).toBe('model');
+    expect((await explain(PAIR)).source).toBe('template');
+    expect(model.requests).toHaveLength(1);
+  });
+
+  it('starts a new allowance for each client at midnight UTC', async () => {
+    let now = new Date('2026-09-30T23:59:00Z');
+    const { explain, model } = setup(() => REFUSED, { clientCap: 1, now: () => now });
+
+    await explain(PAIR);
+    await explain(PAIR);
+    expect(model.requests).toHaveLength(1);
+
+    now = new Date('2026-10-01T00:00:01Z');
+    await explain(PAIR);
     expect(model.requests).toHaveLength(2);
   });
 
@@ -227,10 +329,14 @@ describe('the step explainer', () => {
   });
 
   it('never calls anything or logs anything without a model', async () => {
-    const explainer = createStepExplainer({ model: null, dailyCallCap: 100 });
+    const explainer = createStepExplainer({
+      model: null,
+      dailyCallCap: 100,
+      clientDailyCallCap: 100,
+    });
     const { log, entries } = recordingLog();
 
-    expect(await explainer.explain(PAIR, { index: 0, log })).toEqual({
+    expect(await explainer.explain(PAIR, { index: 0, log, client: ALICE })).toEqual({
       source: 'template',
       text: template(PAIR),
       reason: 'no-model',
@@ -242,9 +348,15 @@ describe('the step explainer', () => {
     const model = createFakeTextModel((request) =>
       request.prompt.includes('the cross') ? goodText(CROSS) : goodText(PAIR),
     );
-    const explainer = createStepExplainer({ model, dailyCallCap: 100, cacheSize: 1 });
+    const explainer = createStepExplainer({
+      model,
+      dailyCallCap: 100,
+      clientDailyCallCap: 100,
+      cacheSize: 1,
+    });
     const { log } = recordingLog();
-    const explain = (step: StepToExplain) => explainer.explain(step, { index: 0, log });
+    const explain = (step: StepToExplain) =>
+      explainer.explain(step, { index: 0, log, client: ALICE });
 
     await explain(CROSS);
     await explain(PAIR); // evicts the cross

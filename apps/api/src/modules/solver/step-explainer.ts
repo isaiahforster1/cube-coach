@@ -17,10 +17,10 @@ import {
  * The step explanation agent (ADR-0022 §1).
  *
  * Everything specific to explaining steps lives here: the prompt, the gate and the fact
- * check (ADR-0023), the cache, the daily cap and the logs. The model behind it is a
+ * check (ADR-0023), the cache, the daily caps and the logs. The model behind it is a
  * `TextModel`, so another agent reuses the port and none of this. Whatever happens,
- * `explain` resolves with an explanation: a model
- * that fails, is refused, or is out of budget gives way to the template.
+ * `explain` resolves with an explanation: a guest, or a model that fails, is refused, or
+ * is out of budget, gets the template.
  */
 
 /** The logger calls the explainer makes. Fastify's `request.log` fits. */
@@ -33,8 +33,18 @@ export interface StepToExplain extends ExplainableStep {
   readonly kind: 'cross' | 'pair';
 }
 
+export interface ExplainContext {
+  readonly index: number;
+  readonly log: ExplainerLog;
+  /**
+   * Whose daily budget a model call spends, from `explanationClient`, or `null` for a
+   * guest, who gets the template without the model or the cache (ADR-0022 §5).
+   */
+  readonly client: string | null;
+}
+
 export interface StepExplainer {
-  explain(step: StepToExplain, context: { index: number; log: ExplainerLog }): Promise<Explanation>;
+  explain(step: StepToExplain, context: ExplainContext): Promise<Explanation>;
 }
 
 export interface StepExplainerOptions {
@@ -42,6 +52,8 @@ export interface StepExplainerOptions {
   readonly model: TextModel | null;
   /** Model calls allowed per UTC day, cache hits not counted (ADR-0022 §5). */
   readonly dailyCallCap: number;
+  /** The share of `dailyCallCap` any one client may spend in a UTC day. At least 1. */
+  readonly clientDailyCallCap: number;
   readonly names?: ColourNames;
   /** One deadline per step, covering any retry the adapter makes (ADR-0022 §6). */
   readonly timeoutMs?: number;
@@ -76,36 +88,62 @@ function createLruCache(capacity: number) {
   };
 }
 
+/** Which cap refused a call, so the right one is logged. */
+type Refusal = 'global' | 'client';
+
 /**
- * Calls left today. The day is UTC, so the cap resets at one moment everywhere, whatever
- * the server's time zone.
+ * Calls left today, for everyone and for each client. The day is UTC, so the caps reset
+ * at one moment everywhere, whatever the server's time zone.
+ *
+ * Both caps are checked before either is spent. A call that one cap refuses spends nothing
+ * from the other: a client loses none of its share on a day the global cap has already
+ * run out, and a client past its own share takes nothing more from everyone else.
+ *
+ * A client is recorded only when a call is spent, so the map never holds more than `cap`
+ * clients, however many addresses someone rotates through.
  */
-function createDailyBudget(cap: number, now: () => Date) {
+function createDailyBudget(cap: number, clientCap: number, now: () => Date) {
   let day = '';
   let used = 0;
-  let warned = false;
+  const usedBy = new Map<string, number>();
+  let warnedGlobal = false;
+  const warnedClients = new Set<string>();
 
   const today = () => now().toISOString().slice(0, 10);
   const roll = () => {
     if (day !== today()) {
       day = today();
       used = 0;
-      warned = false;
+      usedBy.clear();
+      warnedGlobal = false;
+      warnedClients.clear();
     }
   };
 
   return {
-    /** Spend one call if there is one left. */
-    take(): boolean {
+    /** Spend one call for `client` if both caps have one left; otherwise say which refused. */
+    take(client: string): Refusal | null {
       roll();
-      if (used >= cap) return false;
+      if (used >= cap) return 'global';
+      const clientUsed = usedBy.get(client) ?? 0;
+      if (clientUsed >= clientCap) return 'client';
       used += 1;
-      return true;
+      usedBy.set(client, clientUsed + 1);
+      return null;
     },
-    /** True only the first time the cap is hit each day, so it is logged once. */
-    firstRefusalToday(): boolean {
-      if (warned) return false;
-      warned = true;
+    /**
+     * True only the first time each cap refuses each day (each client, for the client
+     * cap), so a refusal is logged once rather than for every step after it. A client is
+     * only refused by its own cap once it is in `usedBy`, so this set is bounded too.
+     */
+    firstRefusalToday(refusal: Refusal, client: string): boolean {
+      if (refusal === 'global') {
+        if (warnedGlobal) return false;
+        warnedGlobal = true;
+        return true;
+      }
+      if (warnedClients.has(client)) return false;
+      warnedClients.add(client);
       return true;
     },
   };
@@ -120,15 +158,22 @@ function failureDetails(error: unknown): object {
 }
 
 export function createStepExplainer(options: StepExplainerOptions): StepExplainer {
-  const { model, dailyCallCap } = options;
+  const { model, dailyCallCap, clientDailyCallCap } = options;
   const names = options.names ?? STANDARD_COLOUR_NAMES;
   const timeoutMs = options.timeoutMs ?? 6_000;
   const cache = createLruCache(options.cacheSize ?? 5_000);
-  const budget = createDailyBudget(dailyCallCap, options.now ?? (() => new Date()));
+  const budget = createDailyBudget(
+    dailyCallCap,
+    clientDailyCallCap,
+    options.now ?? (() => new Date()),
+  );
 
   return {
-    async explain(step, { index, log }) {
-      if (model === null) return chooseExplanation(step, undefined, names);
+    async explain(step, { index, log, client }) {
+      // Model explanations are for accounts. A guest gets the template, even for a step
+      // that is cached: a hit is free, but whether a guest saw model text would then
+      // depend on which scrambles signed-in users happened to solve first.
+      if (model === null || client === null) return chooseExplanation(step, undefined, names);
 
       const prompt = buildStepPrompt(step, names);
       // Everything that decides the reply, and nothing else. Two scrambles that reach the
@@ -147,12 +192,22 @@ export function createStepExplainer(options: StepExplainerOptions): StepExplaine
         promptVersion: EXPLAIN_PROMPT_VERSION,
       };
 
-      if (!budget.take()) {
-        if (budget.firstRefusalToday()) {
-          log.warn(
-            { ...where, dailyCallCap },
-            'Explanation model daily cap reached; using the template',
-          );
+      const refusal = budget.take(client);
+      if (refusal !== null) {
+        // The client key is not logged: it is a user id or an address, and the request
+        // log already records the address.
+        if (budget.firstRefusalToday(refusal, client)) {
+          if (refusal === 'global') {
+            log.warn(
+              { ...where, dailyCallCap },
+              'Explanation model daily cap reached; using the template',
+            );
+          } else {
+            log.warn(
+              { ...where, clientDailyCallCap },
+              'Explanation client daily cap reached; using the template',
+            );
+          }
         }
         return chooseExplanation(step, undefined, names);
       }
@@ -164,8 +219,8 @@ export function createStepExplainer(options: StepExplainerOptions): StepExplaine
           prompt,
           maxTokens: MAX_TOKENS,
           signal: AbortSignal.timeout(timeoutMs),
-          // A retry is a second request to the provider's quota, so it spends the cap too.
-          mayRetry: () => budget.take(),
+          // A retry is a second request to the provider's quota, so it spends both caps too.
+          mayRetry: () => budget.take(client) === null,
         });
       } catch (error) {
         log.warn(
