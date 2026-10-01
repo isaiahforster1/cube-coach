@@ -509,15 +509,48 @@ function checkPiecePlaces(reader: Reader) {
 }
 
 const isRotation = (token: string) => /^[xyz]/u.test(token);
-const JOINS = /\bjoin|\b(?:becomes?|became|forms?|formed|makes?|made)\s+(?:a|the|one)\s+pair\b/u;
+const JOINS =
+  /\bjoin|\bconnect|\bpairs\s+(?:up\s+)?(?:the|them|it|these)\b|\b(?:becomes?|became|forms?|formed|makes?|made)\s+(?:a|the|one)\s+pair\b/u;
 const INSERTS = /\binsert|\bfinish|\bcomplete|\binto\s+(?:the|its)\s+slot\b/u;
+/**
+ * Not join claims: "use L to start joining" is true of the first joining move, and "the
+ * joined pair" names the pair, not what the run does to it.
+ */
+const NOT_JOINING =
+  /\b(?:start|begin)(?:s|ning|ing)?\s+(?:to\s+)?join\w*|\bjoined\s+(?:pair|pieces)\b/gu;
+/** A run named with one of these before it is the instrument of the verb before it. */
+const BY_MEANS_OF = /\b(?:using|with|by|via)\s*$/u;
+/**
+ * "the remaining moves R U R'", "leaving us with R U R'": what is left after the join. Only
+ * right before the run, so in "the remaining moves finish the insert using R U R' U'" the
+ * run is how the insert is done, which may be the whole step.
+ */
+const REMAINING =
+  /(?:\bremaining(?:\s+(?:\d+|\w+))?(?:\s+(?:moves?|turns?))?|\bthe\s+rest(?:\s+of\s+the\s+(?:moves|sequence))?|\b(?:leaving|left)\s+(?:us\s+|you\s+)?with)(?:\s+(?:using|with|of))?\s*$/u;
+/** Where a clause starts: "…are joined, and the remaining moves using R U R' insert it". */
+const CLAUSE = /,\s*(?:and|then|but|while)\b|;/gu;
+
+/** What a run of moves is said to do, from the words around it. */
+function roleOf(before: string, after: string) {
+  // Named as what is left over: the insert, and only part of the step, never a summary.
+  if (REMAINING.test(before)) return { joins: false, inserts: true, part: true };
+  // Otherwise the verb is after the run, unless the run is how the verb before it in the
+  // same clause is done.
+  const clause = before.split(CLAUSE).at(-1)!;
+  const words = (BY_MEANS_OF.test(clause) ? clause : after).replaceAll(NOT_JOINING, '');
+  return { joins: JOINS.test(words), inserts: INSERTS.test(words), part: false };
+}
 
 /**
  * Which moves the text says join the pair, and which insert it: "R U R' joins them, and
  * U2 R U' R' inserts the pair". A run of the step's moves named as joining must be exactly
  * the moves before `joinedAfter`, with no rotation among them. A run named as inserting
- * must be exactly the moves after it. A run said to do both is a summary of the whole
- * step and is not checked.
+ * must be exactly the moves after it, and so must "the remaining moves". A run said to do
+ * both must run to the end of the step from no later than the move that joins the pair:
+ * "U2 sets them up, then F' U' F joins and inserts them" is true when `F'` joins them.
+ *
+ * A run naming every move with only one verb is not checked: the facts call the whole
+ * pair step its insert (`insertLength`), so "R U R' U' finishes the insert" is a summary.
  *
  * Notation is read here as words that are exactly one of the step's tokens. The notation
  * gate has already passed, so every piece of notation in the text is one of them.
@@ -530,6 +563,9 @@ function checkMoveRoles(reader: Reader) {
   const moves = step.tokens.filter((token) => !isRotation(token));
   const joining = moves.slice(0, joined.joinedAfter).join(' ');
   const inserting = moves.slice(joined.joinedAfter).join(' ');
+  const joiningAndInserting = new Set(
+    moves.slice(0, Math.max(joined.joinedAfter, 1)).map((_, k) => moves.slice(k).join(' ')),
+  );
 
   for (const sentence of sentencesOf(reader.original)) {
     // Runs of tokens, which "and" or a comma between two tokens does not break: "U and R'"
@@ -554,15 +590,21 @@ function checkMoveRoles(reader: Reader) {
 
     runs.forEach((run, i) => {
       const said = run.tokens.filter((token) => !isRotation(token)).join(' ');
-      // Naming every move of the step, with or without its rotation, is a summary.
-      if (said === '' || said === moves.join(' ')) return;
-      // What the run does is said after it, before the next run starts.
+      if (said === '') return;
+      // What the run does is said between the runs on either side of it.
+      const before = normalise(sentence.slice(runs[i - 1]?.end ?? 0, run.start));
       const after = normalise(sentence.slice(run.end, runs[i + 1]?.start));
-      const joins = JOINS.test(after);
-      const inserts = INSERTS.test(after);
-      if (joins === inserts) return;
+      const { joins, inserts, part } = roleOf(before, after);
+      const whole = said === moves.join(' ');
       // Written in full here, so a rotation among the joining moves is caught.
       const written = run.tokens.join(' ');
+      if (joins && inserts) {
+        if (!joiningAndInserting.has(said)) {
+          report(reader, 'move-role', `${written} … join and insert`, [...joiningAndInserting]);
+        }
+        return;
+      }
+      if (whole && !part) return;
       if (joins && written !== joining) {
         const allowed = joining === '' ? 'none: they start joined' : joining;
         report(reader, 'move-role', `${written} … join`, [allowed]);

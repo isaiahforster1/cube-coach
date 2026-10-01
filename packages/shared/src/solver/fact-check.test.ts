@@ -295,6 +295,96 @@ describe('which moves join and which insert', () => {
   it('leaves a run alone when nothing after it says what it does', () => {
     expect(kinds("Turn U R' U first, then the rest.", FIRST_PAIR)).toEqual([]);
   });
+
+  it('reads the verb before a run named with "using" or "with"', () => {
+    expect(kinds("They are joined after 4 moves using U R' U R2.", FIRST_PAIR)).toEqual([]);
+    expect(kinds("They are joined after 4 moves using U R' U.", FIRST_PAIR)).toEqual(['move-role']);
+    expect(kinds("We finish the insert with R2 U R'.", FIRST_PAIR)).toEqual(['move-role']);
+  });
+
+  it('reads the verb before a run only within its own clause', () => {
+    const text = "They are joined, and the last moves using U R' insert the pair.";
+    expect(kinds(text, FIRST_PAIR)).toEqual([]);
+  });
+
+  it('reads "pairs" and "connects" as joining, but not "the joined pair" or "start joining"', () => {
+    expect(kinds("U R' U connects the corner and edge.", FIRST_PAIR)).toEqual(['move-role']);
+    expect(kinds("U R' U pairs them up.", FIRST_PAIR)).toEqual(['move-role']);
+    expect(kinds("Finally U R' inserts the joined pair.", FIRST_PAIR)).toEqual([]);
+    expect(kinds('Use U to start joining the corner and edge.', FIRST_PAIR)).toEqual([]);
+  });
+
+  it('passes a run said to join and insert that runs from the join to the end', () => {
+    // The pair joins on the fourth move, R2, so any run ending the step from U to R2 does both.
+    for (const run of ["U R' U R2 U R'", "R' U R2 U R'", "R2 U R'"]) {
+      expect(kinds(`Then ${run} joins and inserts the pair.`, FIRST_PAIR), run).toEqual([]);
+    }
+  });
+
+  it('refuses a run said to join and insert that is not the end of the step', () => {
+    expect(kinds("U R' U R2 U joins the corner and edge and inserts them.", FIRST_PAIR)).toEqual([
+      'move-role',
+    ]);
+    expect(kinds("U R' joins the corner and edge and inserts them.", FIRST_PAIR)).toEqual([
+      'move-role',
+    ]);
+  });
+
+  it('reads "the remaining moves" as the insert, even when they name every move', () => {
+    expect(kinds("The remaining moves U R' insert the pair.", FIRST_PAIR)).toEqual([]);
+    expect(kinds("They are joined, leaving us with U R'.", FIRST_PAIR)).toEqual([]);
+    for (const text of [
+      "Finish the insert using the remaining moves U R' U R2 U R'.",
+      "They are joined after 4 moves, leaving us with U R' U R2 U R'.",
+      "The remaining moves using R2 U R' insert the pair.",
+    ]) {
+      expect(kinds(text, FIRST_PAIR), text).toEqual(['move-role']);
+    }
+  });
+
+  it('passes "the remaining moves" when the run is how a verb after it is done', () => {
+    // "using" names how the insert is done, and the facts call the whole step the insert.
+    const text =
+      "After 4 moves they are a pair, and the remaining moves finish the insert using U R' U R2 U R'.";
+    expect(kinds(text, FIRST_PAIR)).toEqual([]);
+  });
+
+  /** Four of the five wrong move roles ADR-0023's seed-2027 measurement let through. */
+  it('refuses the real replies the first version let through', () => {
+    const cases: [scramble: string, face: Face, index: number, text: string][] = [
+      [
+        // `y2 F' L U2 F L'`, joined after 2: `F' L` join.
+        "B D2 U' B L' D2 U B2 R2 B F2 U2 L' B2 U L' F2 B D' B' F R' D' L F",
+        'B',
+        1,
+        "The corner is at bottom back left and the edge is at top back, and they are joined after 2 moves using F' L U2. Then the insert uses F L'.",
+      ],
+      [
+        // `y2 R U F R F' R'`: the run said to join and insert ends in R, not R'.
+        "D' L' F' R2 L' D2 U B2 L B' R2 D2 F2 B D2 B' U B2 U' L D F D B2 D'",
+        'F',
+        3,
+        "The moves R U F R F' R join them after five moves and insert the pair.",
+      ],
+      [
+        // `y U2 R F R F' R'`, joined after 5: only `R'` remains.
+        "U F' R2 F2 D' F' R2 L D2 F L U2 L D2 L2 B' R2 U' F B2 U' B L D' R",
+        'D',
+        1,
+        "The corner starts at top front left and the edge starts at top back, with the pieces joining after 5 moves. Finish the insert using the remaining moves U2 R F R F' R'.",
+      ],
+      [
+        // `y2 F' U2 F U F' U' F`, joined after 5: `U' F` remain.
+        "U F' R2 F2 D' F' R2 L D2 F L U2 L D2 L2 B' R2 U' F B2 U' B L D' R",
+        'D',
+        4,
+        "The corner and edge are joined after 5 moves, leaving us with F' U2 F U F' U' F.",
+      ],
+    ];
+    for (const [scramble, face, index, text] of cases) {
+      expect(kinds(text, stepOf(scramble, face, index)), text).toEqual(['move-role']);
+    }
+  });
 });
 
 // ─── Over real solves ────────────────────────────────────────────────────────────────
