@@ -309,6 +309,20 @@ describe('chooseExplanation', () => {
       unknown: ['U2'],
     });
   });
+
+  it('throws the text away and says why when it contradicts a fact', () => {
+    expect(chooseExplanation(step, "R U R' inserts the pair in 4 moves.", NAMES)).toEqual({
+      source: 'template',
+      text: template,
+      reason: 'contradicted',
+      mismatches: [{ claim: 'count', said: '4 moves', allowed: ['0', '3'] }],
+    });
+  });
+
+  it('reports a text that fails both checks as refused: the gate runs first', () => {
+    const result = chooseExplanation(step, "R U2 R' inserts the pair in 4 moves.", NAMES);
+    expect(result).toMatchObject({ reason: 'refused', unknown: ['U2'] });
+  });
 });
 
 // ─── Over real solves ────────────────────────────────────────────────────────────────

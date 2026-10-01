@@ -5,13 +5,15 @@
  * sentences, with no model involved: it is what is shown when no model is configured, and
  * the fallback whenever a model's text is refused. {@link checkNotation} is the gate a
  * model's text must pass: every piece of move notation in it must be one of that step's
- * tokens. {@link chooseExplanation} puts the two together.
+ * tokens. {@link chooseExplanation} puts the two together, with the fact check from
+ * `fact-check.ts` (ADR-0023) after the gate.
  *
  * The template only restates facts. It adds no reasoning of its own, so anything it says
  * was built and re-derived by the engine. Colour names are passed in, because the colour
  * scheme belongs to the interface (see `types.ts`), not the engine.
  */
 import type { Face, Token } from '../cube/types.js';
+import { checkFacts, type FactMismatch } from './fact-check.js';
 import {
   factOf,
   type AlsoSolvedFact,
@@ -297,12 +299,21 @@ export type Explanation =
       readonly reason: 'refused';
       /** The notation that caused the model's text to be refused, for logging. */
       readonly unknown: readonly string[];
+    }
+  | {
+      readonly source: 'template';
+      readonly text: string;
+      readonly reason: 'contradicted';
+      /** The claims in the model's text that disagree with the facts, for logging. */
+      readonly mismatches: readonly FactMismatch[];
     };
 
 /**
- * The text to show for a step: the model's, if there is one and it passes the gate, or
- * else the template. `modelText` is `undefined` when no model is configured or it gave
- * nothing back; blank text is treated the same way.
+ * The text to show for a step: the model's, if there is one and it passes both the
+ * notation gate and the fact check (ADR-0023), or else the template. The gate runs first,
+ * so a text that adds a move is `refused` whatever else it says. `modelText` is
+ * `undefined` when no model is configured or it gave nothing back; blank text is treated
+ * the same way.
  */
 export function chooseExplanation(
   step: ExplainableStep,
@@ -313,8 +324,18 @@ export function chooseExplanation(
   if (modelText === undefined || modelText.trim() === '') {
     return { source: 'template', text: template(), reason: 'no-model' };
   }
-  const check = checkNotation(modelText, step.tokens);
-  return check.ok
-    ? { source: 'model', text: modelText }
-    : { source: 'template', text: template(), reason: 'refused', unknown: check.unknown };
+  const notation = checkNotation(modelText, step.tokens);
+  if (!notation.ok) {
+    return { source: 'template', text: template(), reason: 'refused', unknown: notation.unknown };
+  }
+  const facts = checkFacts(modelText, step, names);
+  if (!facts.ok) {
+    return {
+      source: 'template',
+      text: template(),
+      reason: 'contradicted',
+      mismatches: facts.mismatches,
+    };
+  }
+  return { source: 'model', text: modelText };
 }

@@ -13,6 +13,7 @@ export {
   type Explanation,
   type NotationCheck,
 } from './explain.js';
+export { checkFacts, type ClaimKind, type FactCheck, type FactMismatch } from './fact-check.js';
 export {
   factOf,
   type AlsoSolvedFact,
