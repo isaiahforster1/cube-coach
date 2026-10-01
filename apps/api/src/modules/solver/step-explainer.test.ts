@@ -85,6 +85,43 @@ describe('the step explainer', () => {
     ]);
   });
 
+  it('falls back to the template and logs what did not match when the text contradicts a fact', async () => {
+    // PAIR's chosen pair is orange–green, at front left before its `y'` and front right after.
+    const CONTRADICTED = 'The orange–green pair at back left goes first.';
+    const { explain, entries } = setup(() => CONTRADICTED);
+    const result = await explain(PAIR, 1);
+
+    expect(result.source).toBe('template');
+    expect(result.text).toBe(template(PAIR));
+    expect(entries).toEqual([
+      {
+        level: 'warn',
+        message: 'Explanation contradicted the step facts; using the template',
+        details: {
+          step: 1,
+          kind: 'pair',
+          model: 'fake:model',
+          promptVersion: EXPLAIN_PROMPT_VERSION,
+          mismatches: [
+            {
+              claim: 'pair-place',
+              said: 'orange-green pair at back left',
+              allowed: ['front-left', 'front-right'],
+            },
+          ],
+          refusedText: CONTRADICTED,
+        },
+      },
+    ]);
+  });
+
+  it('does not cache a contradicted text, so the next request asks again', async () => {
+    const { explain, model } = setup(() => 'The orange–green pair at back left goes first.');
+    await explain(PAIR);
+    await explain(PAIR);
+    expect(model.requests).toHaveLength(2);
+  });
+
   it('cuts the refused text to 500 characters in the log', async () => {
     const { explain, entries } = setup(() => `${REFUSED} ${'and so on '.repeat(100)}`);
     await explain(PAIR);

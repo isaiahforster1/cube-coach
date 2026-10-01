@@ -16,8 +16,8 @@ import {
 /**
  * The step explanation agent (ADR-0022 §1).
  *
- * Everything specific to explaining steps lives here: the prompt, the gate, the cache, the
- * daily cap and the logs. The model behind it is a `TextModel`, so another agent reuses the
+ * Everything specific to explaining steps lives here: the prompt, the gate and the fact
+ * check (ADR-0023), the cache, the daily cap and the logs. The model behind it is a `TextModel`, so another agent reuses the
  * port and none of this. Whatever happens, `explain` resolves with an explanation: a model
  * that fails, is refused, or is out of budget gives way to the template.
  */
@@ -173,17 +173,19 @@ export function createStepExplainer(options: StepExplainerOptions): StepExplaine
       }
 
       const explanation = chooseExplanation(step, text, names);
+      const refusedText = text.slice(0, REFUSED_TEXT_LIMIT);
       if (explanation.source === 'model') {
-        // Only text that passed the gate is kept. A refusal is tried again next time.
+        // Only text that passed both checks is kept. A refusal is tried again next time.
         cache.set(key, text);
       } else if (explanation.reason === 'refused') {
         log.warn(
-          {
-            ...where,
-            unknown: explanation.unknown,
-            refusedText: text.slice(0, REFUSED_TEXT_LIMIT),
-          },
+          { ...where, unknown: explanation.unknown, refusedText },
           'Explanation refused by the notation gate; using the template',
+        );
+      } else if (explanation.reason === 'contradicted') {
+        log.warn(
+          { ...where, mismatches: explanation.mismatches, refusedText },
+          'Explanation contradicted the step facts; using the template',
         );
       }
       return explanation;

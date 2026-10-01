@@ -13,6 +13,13 @@
  * It calls the adapter directly rather than through the explainer, so the cache cannot
  * hide a refusal and the cap cannot cut the run short. The report is also written to
  * `explanation-live.txt` in the system temp directory.
+ *
+ * It also reports how often the fact check (ADR-0023) throws a reply away, with each claim
+ * that failed, but does not fail on it: whether a contradiction is the model's mistake or
+ * the check's can only be told by reading it. Every answered step is saved to
+ * `explanation-live.json` (scramble, face, step index and reply), so a change to either
+ * check can be replayed on the same replies without spending quota. Set
+ * `EXPLANATION_LIVE_SEED` to measure on scrambles other than the default seed's.
  */
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,6 +35,7 @@ import {
   solveCross,
   solveF2L,
   STANDARD_COLOUR_NAMES,
+  type FactMismatch,
   type Move,
 } from '@cube-coach/shared';
 import { createGeminiTextModel, type GeminiUsage } from '../../ai/gemini-text-model.js';
@@ -63,6 +71,7 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
   const solves = Number(process.env['EXPLANATION_LIVE_SOLVES'] ?? 20);
   // About 13 requests a minute: under the free tier's per-minute limit for Flash-Lite.
   const spacingMs = Number(process.env['EXPLANATION_LIVE_SPACING_MS'] ?? 4_500);
+  const seed = Number(process.env['EXPLANATION_LIVE_SEED'] ?? 2026);
 
   it(
     `keeps refusals under ${MAX_REFUSAL_RATE * 100}% of steps`,
@@ -79,7 +88,7 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
         onUsage: (u) => usage.push(u),
       });
 
-      const provider = createRandomMoveScrambleProvider({ random: seededRandom(2026) });
+      const provider = createRandomMoveScrambleProvider({ random: seededRandom(seed) });
       const latencies: number[] = [];
       const refused: {
         scramble: string;
@@ -87,8 +96,16 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
         unknown: readonly string[];
         text: string;
       }[] = [];
+      const contradicted: {
+        scramble: string;
+        step: number;
+        mismatches: readonly FactMismatch[];
+        text: string;
+      }[] = [];
       const failures: Record<string, number> = {};
       const samples: string[] = [];
+      // Every answered step, so a change to the checks can be replayed without spending quota.
+      const corpus: { scramble: string; face: string; index: number; text: string }[] = [];
       let steps = 0;
 
       for (let solve = 0; solve < solves; solve += 1) {
@@ -109,12 +126,20 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
               signal: AbortSignal.timeout(6_000),
             });
             latencies.push(performance.now() - began);
+            corpus.push({ scramble: formatAlgorithm(scramble), face, index, text });
             const explanation = chooseExplanation(step, text, STANDARD_COLOUR_NAMES);
             if (explanation.source === 'template' && explanation.reason === 'refused') {
               refused.push({
                 scramble: formatAlgorithm(scramble),
                 step: index,
                 unknown: explanation.unknown,
+                text,
+              });
+            } else if (explanation.source === 'template' && explanation.reason === 'contradicted') {
+              contradicted.push({
+                scramble: formatAlgorithm(scramble),
+                step: index,
+                mismatches: explanation.mismatches,
                 text,
               });
             } else if (samples.length < 6 && (index === 0 || index === 1)) {
@@ -137,18 +162,28 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
       const sum = (key: keyof GeminiUsage) => usage.reduce((total, u) => total + (u[key] ?? 0), 0);
       const refusalRate = answered === 0 ? 1 : refused.length / answered;
 
+      const contradictionRate = answered === 0 ? 1 : contradicted.length / answered;
+      const claims = (m: readonly FactMismatch[]) =>
+        m.map((x) => `${x.claim} "${x.said}" (facts: ${x.allowed.join(', ')})`).join('; ');
+
       const report = [
-        `model ${model.id}, prompt v${EXPLAIN_PROMPT_VERSION}, ${solves} solves, ${steps} steps`,
+        `model ${model.id}, prompt v${EXPLAIN_PROMPT_VERSION}, seed ${seed}, ${solves} solves, ${steps} steps`,
         `answered ${answered}, failed ${steps - answered} ${JSON.stringify(failures)}`,
         `refused ${refused.length} (${(refusalRate * 100).toFixed(1)}% of answered)`,
         `latency ms: median ${percentile(latencies, 50).toFixed(0)}  p95 ${percentile(latencies, 95).toFixed(0)}  max ${percentile(latencies, 100).toFixed(0)}`,
         `tokens per answered step: input ${(sum('promptTokenCount') / Math.max(answered, 1)).toFixed(0)}, ` +
           `output ${(sum('candidatesTokenCount') / Math.max(answered, 1)).toFixed(0)}, ` +
           `thinking ${(sum('thoughtsTokenCount') / Math.max(answered, 1)).toFixed(0)}`,
+        `contradicted by the fact check ${contradicted.length} (${(contradictionRate * 100).toFixed(1)}% of answered)`,
         '',
         'refusals:',
         ...refused.map(
           (r) => `  step ${r.step} of ${r.scramble}: ${r.unknown.join(' ')}\n    ${r.text}`,
+        ),
+        '',
+        'contradictions:',
+        ...contradicted.map(
+          (c) => `  step ${c.step} of ${c.scramble}: ${claims(c.mismatches)}\n    ${c.text}`,
         ),
         '',
         'samples:',
@@ -158,6 +193,7 @@ describe.runIf(process.env['EXPLANATION_LIVE'] === '1')('explanation model, live
       // the numbers are meant to be copied into ADR-0022.
       const reportPath = join(tmpdir(), 'explanation-live.txt');
       writeFileSync(reportPath, `${report}\n`);
+      writeFileSync(join(tmpdir(), 'explanation-live.json'), JSON.stringify(corpus, null, 2));
       console.log(`${report}\n\nreport written to ${reportPath}`);
 
       expect(answered).toBeGreaterThan(steps / 2);
