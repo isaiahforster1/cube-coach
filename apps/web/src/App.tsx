@@ -6,6 +6,7 @@ import { RegisterPage } from './features/auth/RegisterPage.js';
 import { VerifyEmailPage } from './features/auth/VerifyEmailPage.js';
 import { CubePlayground } from './features/cube/CubePlayground.js';
 import { HistoryPage } from './features/history/HistoryPage.js';
+import { SolverPage } from './features/solver/SolverPage.js';
 import { StatsPage } from './features/stats/StatsPage.js';
 import { TimerPage } from './features/timer/TimerPage.js';
 
@@ -25,6 +26,7 @@ export function App(): ReactElement {
       <Route path="/stats" element={<StatsPage />} />
       <Route path="/cube" element={<CubePlayground />} />
       <Route path="/algorithms" element={<AlgorithmsPage />} />
+      <Route path="/solver" element={<SolverPage />} />
 
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MOVE_PERMUTATIONS } from './permutations.js';
-import { FACELET_COUNT, FACELETS_PER_FACE, FACES, type Face } from './types.js';
+import { MOVE_PERMUTATIONS, ROTATION_PERMUTATIONS } from './permutations.js';
+import { AXES, FACELET_COUNT, FACELETS_PER_FACE, FACES, type Axis, type Face } from './types.js';
 
 /**
  * An independent check on the hand-entered strip tables in permutations.ts.
@@ -79,14 +79,31 @@ const NORMALS: readonly Vector[] = [
 
 /** Build a clockwise quarter turn of `face` purely from geometry. */
 function quarterTurnFromGeometry(face: Face): number[] {
-  const axis = FRAMES[face].normal;
+  return quarterFromGeometry(FRAMES[face].normal, (position, axis) => dot(position, axis) === 1);
+}
+
+/**
+ * Build a clockwise quarter rotation of the whole cube about the axis of `face`.
+ *
+ * The same calculation as a face turn with no layer filter: every cubie turns. It shares
+ * no code with the middle-layer strips in permutations.ts, which is what makes it an
+ * independent check on them.
+ */
+function quarterRotationFromGeometry(face: Face): number[] {
+  return quarterFromGeometry(FRAMES[face].normal, () => true);
+}
+
+function quarterFromGeometry(
+  axis: Vector,
+  turns: (position: Vector, axis: Vector) => boolean,
+): number[] {
   const permutation = Array.from({ length: FACELET_COUNT }, (_, index) => index);
 
   for (let x = -1; x <= 1; x += 1) {
     for (let y = -1; y <= 1; y += 1) {
       for (let z = -1; z <= 1; z += 1) {
         const position: Vector = [x, y, z];
-        if (dot(position, axis) !== 1) continue; // not in the turning layer
+        if (!turns(position, axis)) continue; // not in a turning layer
 
         for (const normal of NORMALS) {
           if (dot(position, normal) !== 1) continue; // sticker is not on the surface
@@ -110,5 +127,22 @@ describe('permutation tables agree with 3D geometry', () => {
 
   it.each(FACES)('%s matches the geometric derivation', (face) => {
     expect(MOVE_PERMUTATIONS[face]).toEqual(quarterTurnFromGeometry(face));
+  });
+});
+
+/** The face whose clockwise turn each rotation follows. */
+const ROTATION_FOLLOWS: Record<Axis, Face> = { x: 'R', y: 'U', z: 'F' };
+
+describe('rotation tables agree with 3D geometry', () => {
+  it('an x rotation carries the front face to the top', () => {
+    // The direction guard for rotations: x follows R, so the front comes up. Getting
+    // this backwards would make every x the x' a cuber means.
+    expect(rotate([0, 0, 1], FRAMES[ROTATION_FOLLOWS.x].normal)).toEqual([0, 1, 0]);
+  });
+
+  it.each(AXES)('%s matches the geometric derivation', (axis) => {
+    expect(ROTATION_PERMUTATIONS[axis]).toEqual(
+      quarterRotationFromGeometry(ROTATION_FOLLOWS[axis]),
+    );
   });
 });

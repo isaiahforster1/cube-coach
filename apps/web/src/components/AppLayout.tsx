@@ -38,7 +38,7 @@ export function AppLayout({
             aria-current on the active link, which is how a screen reader announces which
             page you are on.
 
-            It scrolls sideways rather than wrapping or squeezing: five destinations do
+            It scrolls sideways rather than wrapping or squeezing: six destinations do
             not fit across a phone, and a nav that wraps onto a second line steals height
             from the timer on the one screen where height is the whole point.
           */}
@@ -50,6 +50,7 @@ export function AppLayout({
             <NavItem to="/history">History</NavItem>
             <NavItem to="/stats">Stats</NavItem>
             <NavItem to="/algorithms">Algorithms</NavItem>
+            <NavItem to="/solver">Solver</NavItem>
             <NavItem to="/cube">Cube</NavItem>
           </nav>
         </div>

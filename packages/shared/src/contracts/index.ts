@@ -30,3 +30,11 @@ export {
   type Solve,
   type UpdateSolveRequest,
 } from './solves.js';
+
+export {
+  solverStepsQuerySchema,
+  STANDARD_COLOUR_NAMES,
+  type SolverStep,
+  type SolverStepsQuery,
+  type SolverStepsResponse,
+} from './solver.js';

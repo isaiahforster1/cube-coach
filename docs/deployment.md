@@ -22,22 +22,25 @@ Set on the service. Everything is validated at startup, so a missing or malforme
 fails immediately with the name of the variable rather than surfacing on some later
 request.
 
-| Variable                 | Required | Value                                                                   |
-| ------------------------ | -------- | ----------------------------------------------------------------------- |
-| `NODE_ENV`               | yes      | `production` — switches on secure cookies, HSTS and JSON logs           |
-| `DATABASE_URL`           | yes      | The Postgres connection string the application uses                     |
-| `MIGRATION_DATABASE_URL` | no       | A more privileged connection for migrations only. See below             |
-| `PORT`                   | usually  | Whatever the platform expects; defaults to 3000                         |
-| `HOST`                   | yes      | `0.0.0.0`, or the container is unreachable from outside itself          |
-| `WEB_ORIGIN`             | no       | Leave unset. See below                                                  |
-| `WEB_ROOT`               | no       | Defaults to the built client next to the API                            |
-| `LOG_LEVEL`              | no       | `info`                                                                  |
-| `GOOGLE_CLIENT_ID`       | no       | From the Google Cloud OAuth client                                      |
-| `GOOGLE_CLIENT_SECRET`   | no       | From the same place                                                     |
-| `GOOGLE_REDIRECT_URI`    | no       | `https://<host>/api/v1/auth/google/callback`, character for character   |
-| `RESEND_API_KEY`         | no       | A Resend API key with sending access only. See below                    |
-| `EMAIL_FROM`             | with key | `CubeCoach <verify@mail.<your-domain>>`, on the domain set up in Resend |
-| `APP_URL`                | with key | `https://<host>`, the public address links in emails point to           |
+| Variable                     | Required | Value                                                                   |
+| ---------------------------- | -------- | ----------------------------------------------------------------------- |
+| `NODE_ENV`                   | yes      | `production` — switches on secure cookies, HSTS and JSON logs           |
+| `DATABASE_URL`               | yes      | The Postgres connection string the application uses                     |
+| `MIGRATION_DATABASE_URL`     | no       | A more privileged connection for migrations only. See below             |
+| `PORT`                       | usually  | Whatever the platform expects; defaults to 3000                         |
+| `HOST`                       | yes      | `0.0.0.0`, or the container is unreachable from outside itself          |
+| `WEB_ORIGIN`                 | no       | Leave unset. See below                                                  |
+| `WEB_ROOT`                   | no       | Defaults to the built client next to the API                            |
+| `LOG_LEVEL`                  | no       | `info`                                                                  |
+| `GOOGLE_CLIENT_ID`           | no       | From the Google Cloud OAuth client                                      |
+| `GOOGLE_CLIENT_SECRET`       | no       | From the same place                                                     |
+| `GOOGLE_REDIRECT_URI`        | no       | `https://<host>/api/v1/auth/google/callback`, character for character   |
+| `RESEND_API_KEY`             | no       | A Resend API key with sending access only. See below                    |
+| `EMAIL_FROM`                 | with key | `CubeCoach <verify@mail.<your-domain>>`, on the domain set up in Resend |
+| `APP_URL`                    | with key | `https://<host>`, the public address links in emails point to           |
+| `GEMINI_API_KEY`             | no       | The explanation model's key. Unset means the template explains steps    |
+| `EXPLANATION_MODEL`          | no       | Defaults to `gemini-3.5-flash-lite`                                     |
+| `EXPLANATION_DAILY_CALL_CAP` | no       | Defaults to 450. Keep it under the model's free requests per day        |
 
 ### Why `WEB_ORIGIN` should stay unset
 
@@ -99,6 +102,17 @@ to a site of their choosing.
 
 In development none of this is needed: without a key, the API prints each email, link
 included, to its terminal.
+
+## The explanation model
+
+Optional ([ADR-0022](architecture/0022-step-explanation-agent.md)). The key must come from
+a Google Cloud project with **no billing account linked**. That is what makes the free
+tier a hard limit: past the quota Google refuses the call, the step falls back to the
+template, and nothing is charged. Linking billing to that project moves the key to a paid
+tier.
+
+The daily cap is per process. Running two instances doubles it, so lower it if the
+service is ever scaled out.
 
 ## Database migrations
 

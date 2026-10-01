@@ -2455,3 +2455,1035 @@ Written questions to answer before re-reading the entries above.
    name. Is that a problem?" How do you answer?
 8. **An interviewer asks:** "How would you add password reset on top of this?" Which parts
    can you reuse, and what must reset do that verification doesn't? (Hint: sessions.)
+
+## Whole-cube rotations (solve coaching, part 1)
+
+### Why is a rotation not just another `Move`?
+
+Because `Move` already has a meaning that a great deal of code depends on: one of the 18 face
+turns. Tables are keyed by it (`Record<Move, …>` in the cross search and the edge reader),
+scrambles are stored as it, and the renderer reads the face to animate from its first letter
+with `move[0] as Face`. If `x` joined the union, the tables would have to grow entries they
+have no use for. Worse, `faceOf('x')` would still compile and would return `'x'` labelled as a
+face.
+
+A separate `Rotation` type, plus `Token = Move | Rotation` for the few places that need
+both, means the compiler proves that no scramble, stored algorithm or renderer call can ever
+contain a rotation. The type system is doing a job that tests could only sample.
+
+> "Widening the union would have compiled everywhere and been wrong in one place. Keeping it
+> separate means the compiler rules rotations out of every path that can't handle them."
+
+### What does the type system _not_ protect?
+
+The states that rotations produce. A rotated `CubeState` is still a `CubeState`, so nothing
+stops it being passed to the edge reader or the cross search. Those functions name pieces by
+their sticker labels and slots by position, so after a rotation they report facts that are
+true but easy to misread. For example, the piece labelled `D` might be sitting correctly on
+the face that is now on top.
+
+This is also why `isSolved` stays strict and `isSolvedUpToRotation` judges each face against
+its own centre. Once centres can move, the centre is the only reference that means anything.
+
+> "The type keeps rotations out of old code, but not rotated cubes. Anything that asks 'is
+> this piece home?' has to ask it relative to the centres."
+
+### How were the rotation tables built, and how do you know they're right?
+
+A quarter rotation is three layer turns done together: `x` is `R`, the middle layer, and
+`L'`. The face turns were already verified, so the only new hand-entered data is the middle
+layer: four strips of three stickers per axis, 36 numbers in all.
+
+Those numbers are checked in two independent ways. A test rebuilds each rotation by turning
+3D sticker coordinates and requires the result to match exactly. Conjugation identities such
+as `x U x' = F` require every rotation to relabel every face correctly.
+
+Every test passed first time, so each strip was deliberately reversed to see what caught it.
+The geometry test and the conjugation identities did. The structural tests (bijection, 52
+stickers moved, four quarter turns return to the start) did not, and neither did counting 24
+orientations.
+
+> "A reversed strip is still a perfectly good permutation. It turns the cube the right amount
+> and puts some stickers in the wrong place. Only a second derivation, or an identity that
+> involves two different faces, can tell."
+
+## The step solver's timing prototype (solve coaching, part 2)
+
+### What is IDA\*, and why use it for an F2L pair instead of breadth-first search?
+
+Breadth-first search finds the shortest answer by visiting everything one move away, then
+everything two moves away, and so on. It has to remember every position it has seen, and
+with twelve moves available, the number of 9-move sequences runs into the billions.
+
+IDA\* is depth-first search run again and again with a rising move limit: try every
+sequence of up to 5 moves, then up to 6, and so on. Depth-first search only has to remember
+the current path, so memory stays tiny. The repetition sounds wasteful, but each new limit
+costs so much more than the previous one that re-doing the shallower ones barely matters.
+
+What makes it fast is the **lower bound**: a quick lookup that says "at least this many
+moves are still needed". Any branch where moves used so far plus the lower bound exceeds the
+limit is cut off without being explored.
+
+> "IDA\* is depth-first search with an increasing limit, so it uses almost no memory, and a
+> lower bound lets it skip every branch that provably can't finish within the limit."
+
+### Why is the lower bound the larger of two tables, and not their sum?
+
+Each table answers a smaller question exactly: how far the four cross edges are from solved,
+and how far this corner and edge are from solved. Solving the whole thing needs at least as
+many moves as either part, so the larger of the two is still a guarantee.
+
+Adding them would be wrong, because one move can help both at once. If the bound ever says
+more than the true distance, IDA\* skips the branch that holds the real shortest answer and
+returns a longer one, with no error.
+
+A bound that never overestimates is called **admissible**. The pair table is built with only
+the moves the search is allowed (`U R F L`), which makes its values larger, so it cuts off more,
+while staying admissible for this search.
+
+> "Each table is exact for part of the cube, so the larger of them never overestimates. The
+> sum could, and an overestimate makes IDA\* quietly return a non-optimal answer."
+
+### Why is the budget a 95th percentile instead of an average?
+
+An average hides the slow cases that people actually notice. In the prototype the median was
+under 7 ms, while the slowest solve took 130 ms, about twenty times longer. A mean of 11 ms
+describes neither.
+
+The 95th percentile says 19 of every 20 solves finish within the number. The report still
+shows the maximum, because a percentile target puts no limit on the worst case, and that is
+the number to watch.
+
+> "Search time has a long tail, so I set the budget on p95 and report the maximum next to it.
+> A mean would have hidden the solves people complain about."
+
+### Why is there a position cap as well as a depth limit?
+
+They guard against different failures. The depth limit says "an insert longer than 12 moves
+is not worth showing". The cap says "never let one request run for seconds". A search could
+stay within 12 moves and still visit tens of millions of positions if the lower bound is weak
+for that particular position.
+
+Both fail the step loudly, so neither can be mistaken for "no answer exists". The prototype
+reached neither limit in 3,000 solves. That is evidence the limits are set sensibly, not
+proof, which is why the solver logs every time one is hit.
+
+> "Depth limits the answer, the cap limits the work. Without the cap, one pathological
+> scramble can hang a request even though the answer it's looking for is short."
+
+### How does code that only knows the `D` cross handle a cross on another face?
+
+It relabels the cube. Rotate the scrambled cube so the chosen face is on the bottom, then
+rename every sticker after the centre it now matches. Centres end up back at their home
+labels, so the result is an ordinary position that face turns alone could reach. Every
+existing table and reader works on it unchanged.
+
+It is checked independently: for every face, the cross found on the relabelled cube has the
+same length as `crossDifficulty` gives for that face on the original scramble.
+
+> "A different cross face is a different view of the same cube, not different code. Relabel
+> once at the start, and the D-cross machinery handles all six."
+
+### The timing numbers were fine on the first run. How do you know they measure a working solver?
+
+Only because correctness was checked separately from the search. Every solve is replayed and
+judged on the 54 stickers against the centres. That check does not use the search's piece
+digits or tables. Then two bugs were introduced on purpose: leaving corners out of the goal
+test, and reversing corner twists. Each was caught.
+
+One lesson came out of this. The first time, the broken goal test was caught by the solver's
+own "failed" flag, not by the sticker check. The assertions were reordered so the independent
+check has to catch it, and it did.
+
+> "A fast wrong answer is worse than a slow right one. I checked every solve on the stickers,
+> which don't share code with the search, and broke the search on purpose to prove those
+> checks can fail."
+
+### Questions to answer out loud, without notes
+
+- The lower bound ignores the solved pairs the search must put back. Why is it still
+  admissible, and what does ignoring them cost? (The prototype measured the answer.)
+- Greedy chose the shortest insert every time, and the F2L still totalled 24 moves. Describe
+  a position where greedy is clearly worse than the best order.
+- The scrambles were random-move, not random-state. What could that do to these numbers, and
+  which direction would you expect them to move?
+- Opposite faces commute, so the search tries `R L` but never `L R`. Why is that safe, and
+  what would break if it also skipped `U` after `R`?
+- The cross table takes 90 ms to build and is cached per process. On a server that restarts
+  often, when does that start to matter, and what would you do?
+
+## The step solver's cross (solve coaching, part 3)
+
+### Why does `crossDistance` refuse a rotated cube instead of coping with it?
+
+The edge reader names slots by position. On a rotated cube it still finds every piece, but it
+reports them in the wrong slots, so the table lookup returns a real-looking number that is
+wrong. Nothing would crash. Checking the six centres first costs six comparisons and turns
+that silent error into a thrown one.
+
+The split itself is small: `crossDistance(state, face)` does the lookup, and
+`crossDifficulty(scramble, face)` became one line that applies the scramble and calls it. A
+property test checks the two agree, so the refactor provably changed no behaviour.
+
+> "The reader is only correct when centres are home, so I made that a checked precondition
+> rather than a comment. A wrong answer that looks right is the worst kind of bug."
+
+### How does a move the solver found become the move a person is shown?
+
+The solver only ever turns faces, so its cube always has its centres at home. How the person
+holds the cube is a `Frame`, worked out by rotating a solved cube and reading which centre
+ended up where. Turning the held face `h` turns whichever layer has its centre on `h`. So a
+fixed-frame `U'` for a `U` cross, held with `z2`, is shown as `D'`: the `U` centre is now on the
+bottom. The turn direction never changes, because a rotation is never a mirror image.
+
+The test for this is the identity in ADR-0021 §5: perform the shown tokens on a real cube,
+undo the rotations, and the result must equal the fixed-frame moves applied directly. It runs
+over random scrambles, random frames of up to four rotations, and random move lists, and it
+compares all 54 stickers.
+
+> "The solver reasons in one frame and speaks in another. The translation is a relabelling
+> read off verified tables, and I check it by doing both and comparing the whole cube."
+
+### Why search for the setup rotation instead of writing a six-entry table?
+
+The spike had exactly that table. It was right, but a table is where a typo hides. The
+search tries every sequence of up to two rotations (the test proves that reaches all 24
+orientations), keeps the ones that put the chosen face on the bottom, and prefers the one that
+keeps the front centre in front. That rule is why a `U` cross gets `z2`, not `x2`. The table
+would have encoded the same decision without saying why.
+
+> "The rule is written down as code, so the answer can't disagree with the reason."
+
+### How are ties between optimal moves broken, and what is the honest limit?
+
+At each point the solver takes, of all moves that lower the distance by one, the one that is
+cheapest as held: `R U F L`, then `D`, then `B`. The cost is measured after translation,
+because on an `F` cross, held with `x'`, the fixed `B` face is on top and is performed as
+`U`. Order within the cheap group is an
+arbitrary fixed choice, only there so the same scramble always gets the same cross.
+
+This is greedy, one move at a time. It is not the cheapest of all optimal crosses: an
+expensive first move could open up a cheaper remainder. Finding the true cheapest would need a
+search over every optimal path, remembered per position so it does not blow up. That is worth
+doing only if the crosses shown turn out to be awkward in practice.
+
+> "Every cross is optimal in length. Ergonomics only breaks ties, and it's greedy. I know
+> what the fully correct version would cost and I chose not to pay it yet."
+
+### Why does the oracle check the side stickers, and why only the bottom?
+
+Four bottom-coloured stickers in a plus shape can still be a wrong cross, with two edges
+swapped. Each edge's side sticker must also match its side centre.
+
+It judges only the cross on the bottom as held, not "a cross somewhere". That makes it check
+the setup rotation too: if the rotation were wrong, the cross would be solved but somewhere
+else, and the oracle would reject it. The test adds that the bottom centre is the colour asked
+for. The oracle imports nothing from `analysis/` or from the solver.
+
+### The mutation check failed on its first run. Was the solver wrong?
+
+No, the claim was. The first version said "whenever a mutation changes the shown tokens, the
+oracle must reject them". Swapping `R` and `L` turns `R L` into `L R`, which is a different
+string and the same move, because opposite faces commute. `F' B'` under `x2` instead of `z2`
+is the same case. The oracle was right to accept both.
+
+The claim is now about effects. The oracle may accept a mutated answer only if it moves every
+piece exactly as the correct answer does (compared after undoing each answer's own rotation,
+since `x2` and `z2` leave the cube held differently). Over 600 solves it rejected the inverted
+frame 399 times, the `R`/`L` swap 571 times, and `x2` shown with `z2` used 99 times out of the
+100 `U` crosses. The inverted frame is never caught on `U` or `D`, and should not be: `z2` is
+its own inverse, so that mutation changes nothing there.
+
+A test of the oracle itself was also wrong at first. It rotated a solved cube with `x` and
+expected "no cross on the bottom". But a solved cube has all six crosses solved. The fix was
+to break the other crosses with `U` first.
+
+> "When a check fails, first ask whether the claim was true. Comparing strings instead of
+> effects made a correct result look like a bug."
+
+### Questions to answer out loud, without notes
+
+- `crossDistance` checks centres but not that the state is a legal cube. What input could
+  still get a wrong answer out of it, and where should that be caught?
+- Give a scramble position where the greedy tie-break produces a more awkward cross than the
+  best optimal one. How would memoising cost-to-go per table index fix it, and what does that
+  cost?
+- The inverted-frame mutation can't be caught on a `U` cross. Is that a gap in the oracle or
+  in the mutation? Design a mutation that would be caught on every face.
+- Why is it safe for `toHeld` to keep the turn suffix unchanged? What kind of transformation
+  would make that wrong?
+- The oracle and the solver both use the permutation tables. Given that, in what sense are
+  they independent, and what bug could they still share?
+
+## The step solver's F2L (solve coaching, part 4)
+
+### The spike relabelled the cube to make every cross a `D` cross. Why doesn't the solver?
+
+Relabelling rewrites the stickers so another face looks like `D`, then every answer has to be
+translated back through that relabelling as well as through the grip. That makes two
+translations, and the second one is exactly the kind of silent relabelling ADR-0021 was
+written to avoid. The solver instead searches the real scrambled state with the cross face
+the `CrossStep` chose. The only things that depend on the face are data: which four slots
+exist (`slotsFor`, derived from the corner and edge tables), which cross table bounds the
+search, and which two faces the move set leaves out. The code path is the same for all six.
+
+> "The cross face is an input to the data, not a branch in the code. There's one
+> translation, from fixed to held, and it's the one the cross already tested."
+
+### How does "choose the `y` for each slot" work without a table?
+
+With the cross on the bottom, the four `y` turns carry any slot round all four sides. For each
+candidate (`nothing`, `y`, `y'`, `y2`, in that order) the solver builds the frame and asks
+whether the slot's two side colours are now held at front and right. Exactly one works. The
+frame then fixes the move set: every fixed face except the ones held at the bottom and the
+back. That is how "`U R F L` as held" becomes a different set of fixed faces for each slot.
+
+### Why are there 96 pair tables now instead of 16?
+
+A pair table gives the distance to solve one pair using only the allowed moves. Which moves are
+allowed depends on two faces: the cross face (never turned) and the held back (left out so
+there's no `B`). Six cross faces × four possible backs × four pairs is 96 tables of 576 bytes.
+They are built on demand, 39 ms for all of them. The key is those two excluded faces and the
+pair's pieces, which is precisely what the table depends on.
+
+> "Cache on what the result depends on, nothing more and nothing less."
+
+### Why does the pair table use the restricted moves, when the cross table uses all 18?
+
+Both have to be admissible: never more than the real number of moves left. A distance using
+all 18 moves can only be shorter than one using a subset, so the cross table is a safe
+underestimate for a search restricted to `U R F L`. The pair table built with the restricted
+set is also admissible and is tighter, so it prunes more. Either would give the same answers.
+The tighter one gives them faster.
+
+### The first version met the budget but was nearly three times slower per position than the spike. Why?
+
+It visited exactly the same positions, so the search was fine. The cost was per position. Two
+causes, both in the inner loop:
+
+- `byte()`, the bounds-checked read, is a function call and a branch on every table read.
+- The digit tables moved into their own module and were imported. Vitest compiles an imported
+  name into a property read on a module object each time it is used. The spike had its tables
+  in the same file, so it never paid this.
+
+Copying the tables into local constants and reading them directly took 155 ns per position to
+37 ns. The bounds check is still used where it's cheap, when tables are built. In the inner
+loop the indices are safe because every digit is below 24, and a test checks the digit tables
+against the sticker model for every move.
+
+> "When the work is the same and the time isn't, profile the cost per unit of work before
+> touching the algorithm."
+
+### How do you know the tests would catch a broken solver, not just a broken translation?
+
+The mutation check covers translation. Four mutations each got through on none of the 180
+solves: the `y` shown but not translated, the `y` translated but not shown, the `y` shown
+backwards, and `R` and `L` swapped. The solver itself was broken three ways, one at a time,
+and each was caught on all six faces:
+
+- The goal forgets already-solved pairs. The sticker oracle rejects the finished F2L, and the
+  "keeps every earlier step intact" property fails.
+- The move set allows held `B`. The "no `B` or `D` as held" property fails.
+- The chooser takes the longest insert. The re-derived "shortest was chosen" property fails.
+
+### Questions to answer out loud, without notes
+
+- IDA\* re-searches the shallow levels on every iteration. Why is that acceptable here, and
+  what fraction of the work is repeated?
+- The lower bound is `max(cross, pair)`. Why not `cross + pair`? Give a move that improves
+  both at once.
+- Greedy pair choice picks the shortest insert now. Sketch a scramble where that makes the
+  whole F2L longer, and say what the coaching explanation would lose if the solver looked
+  ahead instead.
+- An insert that solves its own pair can accidentally solve another one. Where does that pair
+  go in the result, and why must it be added to the preserved set straight away?
+- The search tracks only the cross edges and the solved pairs. Why is it correct to ignore
+  every other piece, and what would go wrong if an unsolved pair's pieces were tracked too?
+- The timing test is skipped by default. What stops the solver getting slow without anyone
+  noticing, and what would you add to CI to catch it?
+
+## The step solver's facts (solve coaching, part 5)
+
+### Why are held positions words like `'front'` and not letters like `'F'`?
+
+TypeScript compares types by shape, not by name. If a held position were `'U' | 'R' | 'F' | …`
+it would be exactly the `Face` type, and a colour could be passed where a place was meant
+without any error. The ADR's main risk is an explanation that is true but told in the wrong
+grip, so the two had to be types that cannot be swapped. As words, they can't. `held.test.ts`
+proves it with `@ts-expect-error` in both directions, and the typecheck fails if either
+assignment ever starts compiling. The one place they meet is `NOTATION_LETTER`, because
+notation is positional: `R` means "whatever is on the right".
+
+> "If two things must never be confused, make them different types, not just different names."
+
+### Why re-key `Frame` too, when the ADR only asked for it in facts?
+
+Facts are built from the frame. If `Frame.heldPositionOf` still returned a `Face`, every fact
+builder would have to convert at the edge, and a missed conversion would compile. Keying the
+frame on `HeldPosition` moves the boundary to the one place positions are created. The cost
+was mechanical edits in `cross.ts`, `f2l.ts` and their tests, and no behaviour changed. The
+same 110 tests passed before and after.
+
+### Which grip is each fact told in, and why not one grip for all?
+
+Each fact uses the grip the person is in at that moment of the step. They choose the pair
+before turning the cube, so `pair-choice` uses the grip before the `y`. In that grip the
+chosen slot could be anywhere. In the grip after it, the slot is always front right, which
+explains nothing. They look for the pieces and perform the moves after the `y`, so
+`pair-located`, `preserved` and `also-solved` use that grip. The mutation check builds each
+of these in the other grip and confirms the re-derivation disagrees on every step that has a
+rotation.
+
+### How are the facts checked without repeating the engine's reasoning?
+
+The engine reads the unrotated state with the piece readers and translates positions through
+the frame. The test does neither. It performs the presented tokens on a real cube, rotations
+included. It then reads each sticker's facing from the block it is in and its colour from its
+label, using sticker groups of its own. The corner groups also need a clockwise order for
+twist. That order is anchored at one corner by geometry, and the other seven are proved by
+the moves: every face turn is a rigid rotation, so it must carry each listed corner onto
+another listed corner in the same cyclic order.
+
+### Why does `pair-joined` count the join that lasts, not the first one?
+
+The fact exists to split a step into "set up and join" and "insert". If a pair were joined,
+split and rejoined, the split belongs to the setup, and "first" would count it as part of the
+insert. In practice no shortest insert did this: not in 717 steps across 180 solves, and not
+in 36,000 random `R U` scrambles searched for one. The likely reason is that a correctly
+joined block can always go in whole after a `U` adjustment. A cross-colour-up corner never
+counts as joined, because its edge has no cross-colour sticker to match. That is a conjecture
+with evidence, not a proof. So the definition that is right either way was kept, and a
+hand-built move list (`R R' R U R'` after `R U' R'`) checks the difference.
+
+> "When your data never exercises a branch, build the case by hand. Don't delete the branch."
+
+### How do you know these tests would catch a wrong fact?
+
+Six bugs were planted in the engine, one at a time, and five were caught straight away:
+corner twist reversed, cross edges timed by first solve instead of final solve, edge `fit`
+mislabelled, cross sides named in the scramble grip, and `also-solved` dropped. The sixth
+(first join instead of lasting join) got through, which is what led to the finding above and
+the hand-built test that now catches it.
+
+### What is the honest limit of `pair-choice`?
+
+The test proves each claimed insert length is a real insert: performed on the cube, it solves
+that pair and keeps everything else. So the chosen insert really is no longer than the
+alternatives the engine found. It does not independently prove that no shorter insert
+exists for the other slots. That rests on IDA\* with an admissible lower bound, which the
+F2L tests cover. Re-proving optimality by brute force would take seconds per step.
+
+### Questions to answer out loud, without notes
+
+- A `HeldPosition` and a `Face` are both strings. Explain structural typing, and name one
+  other way to get the same safety, such as a branded type, with its trade-off.
+- `pair-choice` is told before the rotation and `pair-located` after it. Walk through
+  `L' U L` and say what each fact would claim if the grips were swapped.
+- The corner twist is `(cross − vertical) mod 3` over a clockwise sticker order. Why does
+  that order survive translation to held positions, and what kind of transformation would
+  break it?
+- The chirality test would still pass if all eight corners were listed anticlockwise. What
+  stops that, and why can't the move check alone catch it?
+- `crossFacts` and the test both say "solved for good". Give a cross where an edge is solved,
+  knocked out, then solved again, and say what each definition would report.
+- Facts add about 0.5 ms per solve. Where does that time go, and when would you compute facts
+  lazily instead?
+
+## The step solver's explanations (solve coaching, part 6)
+
+### Why is there a template at all, if a model will write the explanation?
+
+Three reasons, and each one alone would justify it. The feature has to work with no model
+configured, so the template is the product in that case, not a stub. A refused model text
+needs something to fall back to, or the step would show nothing. And the template is the
+reference for what an explanation is allowed to say: it restates facts and nothing else,
+so if a model's text says more than the template could, that is a sign it is guessing.
+
+### Why does the template take colour names as a parameter?
+
+The engine labels stickers by face (`'D'`), not by colour, so that the colour scheme lives
+only in the interface (`apps/web/src/features/cube/colours.ts`). A cuber with a Japanese
+scheme cube, or a colour-blind palette, changes that file and nothing else. If the
+template hard-coded "yellow", the engine would have a colour scheme again.
+
+### What exactly does the notation gate check, and what doesn't it check?
+
+It finds every piece of move notation in the text and requires each one to be exactly one
+of that step's tokens. It does **not** check numbers ("7 moves"), colours, or claims in
+words ("the edge is flipped"). Those rest on the model receiving only the facts, and on the
+prompt. The gate is narrow on purpose: notation is the one thing that can be checked
+mechanically and exactly, and a wrong move is the most damaging mistake, because the
+person will perform it.
+
+### Why does the gate look for moves the engine can't even perform, like `r` and `M`?
+
+Because the gate asks "does this text name a move?", not "does it name a move we know?". A
+model that writes `r U r'` has named a move the step does not contain. If the gate only
+recognised the 18 face turns and the rotations, it would skip `r` as an ordinary letter and
+let the text through.
+
+### Why can uppercase turns run together but lowercase can't?
+
+`RUR'` is a common way to write moves, and almost no English word is spelled in capitals
+from only U R F D L B M E S. Lowercase is different: "by" is `b` then `y`, and "fly" is
+`f l y`, all valid lowercase turns. Treating lowercase runs as notation would refuse almost
+every text. So lowercase counts only as a word on its own.
+
+### Which way does the gate fail, and why is that the right way?
+
+It prefers refusing to missing. `RED` in capitals reads as `R E D` and is refused. The cost
+is that the template is shown, which is correct but plainer. Missing a wrong move costs the
+person a wrong turn and the product its trust. Two misses are known and documented: a move
+inside single quotes (`'R'` reads as `R'`, because the closing quote looks like a prime) and
+a possessive (`R's`). They are accepted because the prompt will ask for plain notation, and
+fixing them properly means guessing which apostrophes are primes.
+
+> "When a check can only be wrong one way, choose which way, and write down the other."
+
+### How do you know the gate protects against the mistake it exists for?
+
+The mistake ADR-0020 worried about is a move that is true of the cube but wrong for the
+person holding it: the solver's fixed-frame move instead of the presented one. The test
+offers the fixed-frame moves as if they were a model's text. Of the 554 real steps where
+the two differ, 550 are refused. The other four are relabellings where every fixed move
+happens to be another move the step also contains, which the gate cannot tell apart and
+should not try to.
+
+### How do you know the template itself can't be refused?
+
+Over 120 real solves on all six cross faces, every step's template goes through the same
+gate. A planted bug that printed the inverse of the rotation (`y` for `y'`) failed that
+test and the worked example.
+
+### Questions to answer out loud, without notes
+
+- The gate passes text that says "this takes 5 moves" when the step takes 7. Why is that not
+  the gate's job, and whose job is it?
+- `checkNotation` matches tokens exactly, so `R` does not stand for `R'`. Give a sentence a
+  good model might write that this refuses, and argue whether refusing it is right.
+- Why is it safe for the template to name the rotation, but not safe for it to name a face
+  letter as a colour?
+- Four fixed-frame steps pass the gate. Construct a two-move example of how a relabelling
+  can land on moves the step already contains.
+- `chooseExplanation` treats blank model text as "no model". What would go wrong if it
+  showed blank text instead, and what would go wrong if it treated it as refused?
+- The gate is a denylist of everything notation-shaped not in the tokens. Compare it with
+  an allowlist approach, such as asking the model for structured output that references
+  tokens by index. What does each cost?
+
+## Committing the solver in pieces (solve coaching, part 7)
+
+### Why five commits and not one, or one per step?
+
+One commit of 4,000 lines cannot be reviewed or bisected. One commit per step would mean
+inventing files that never existed, because `solver/cross.ts` imports `crossFacts` from
+`solver/facts.ts`, which was written in step 4. A cross-only commit would need a
+hand-edited `cross.ts` without facts. That is a version nobody ran, so it is fake history.
+The split follows the dependency graph as it is now. Rotations come first because nothing
+depends on the solver. Next is the `crossDistance` refactor, which only needs the cube.
+Then held positions, the frame and the oracle, which only need rotations. Then cross,
+F2L and facts together, because they depend on each other. Last is the template and the
+gate, which nothing else imports.
+
+### What does "each commit builds" mean, and how was it checked?
+
+For each commit, a clean checkout typechecks `packages/shared` and `apps/web` and passes the
+shared tests. This was run in a separate worktree, so the uncommitted files in the working
+copy could not hide a missing file. It matters for `git bisect`. A commit that does not
+build can't tell you whether it introduced a bug, so it breaks the search.
+
+### How can one file be split across commits without an interactive `git add -p`?
+
+Write the version of the file you want in this commit, store it as a blob with
+`git hash-object -w`, and point the index at it with
+`git update-index --cacheinfo 100644,<blob>,<path>`. The working copy is untouched. The
+notes, ADR-0021, the ADR index and `solver/index.ts` were split this way, because each
+grew section by section.
+
+### Questions to answer out loud, without notes
+
+- `cross.ts` depends on `facts.ts`, and `facts.ts` imports types from `f2l.ts`, which
+  imports `cross.ts`. Is that a cycle at runtime, at type level, or both? Why does it
+  still work?
+- If you wanted cross and facts in separate commits next time, what would you change in
+  the code, not the history?
+- `solver/try.test.ts` was left uncommitted. What makes a file worth committing even
+  though it only prints output?
+- Why run the per-commit checks in a separate worktree rather than stashing the rest of
+  the working copy?
+
+## Serving the steps (solve coaching, part 8)
+
+### Why does the server run the solver when the browser already has it?
+
+The browser could run the solver and the template: both are pure functions in
+`packages/shared`, and the scramble rating already runs there. The part that cannot run
+there is the model. Its API key would be visible to anyone who opens dev tools, and the
+notation gate has to run where the model's text arrives, before anyone reads it. Putting
+the route on the server now, with only the template behind it, means the web app's
+contract does not change when the model is added. The cost is a network round trip for
+something the browser could compute. That cost is accepted to avoid moving the feature
+later.
+
+### Why GET and not POST?
+
+GET means the request is safe (it changes nothing) and idempotent (repeating it gives the
+same result). Solving a scramble is both. That allows caching and lets a solution be a
+link, which the history page uses. The usual reasons for POST do not apply here. The body
+would be a scramble of at most 500 characters, and a scramble is not sensitive, so having
+it in a URL or a log is fine.
+
+### Why a separate rate limit for one route?
+
+The global limit is set for cheap requests. This route does 4 to 40 ms of synchronous CPU
+work per request, and while it runs the event loop can serve no one else. It needs no
+account, so the only thing that limits a script calling it is the rate limit. Once a model
+writes the text, every call will also cost money. The limit is a parameter, like
+`credentialMax`. That lets the tests raise it out of the way, and one test lowers it to
+prove it fires.
+
+### Why does the root export the solver by name?
+
+`export *` from two modules that both export the same name is a compile error in
+TypeScript (TS2308), and that error is useful here. `isFirstTwoLayersSolved` exists twice.
+The oracle's version compares stickers with the centres, and the `algorithms/` version
+compares them with a fixed frame. They have the same name but answer different questions.
+Listing the solver's exports makes the public surface a decision. The oracle is a test
+tool, so it stays internal.
+
+### What does the URL-as-state pattern buy on the page?
+
+The text field is a draft, and the URL is what is being solved. Submitting writes the URL.
+The query reads from the URL, and React Query caches by the normalised scramble and face.
+Back, forward, reload and a shared link all work without any code for them, because there
+is no second copy of the state that could fall out of sync.
+
+### Questions to answer out loud, without notes
+
+- The route returns `explanation.source` but not the refused notation (`unknown`). Who is
+  each field for, and what would go wrong if the client could see the refused text?
+- The API test takes its expected tokens from calling `solveCross` and `solveF2L` directly.
+  Isn't that testing the code against itself? What does it prove, and what does it leave
+  to another suite?
+- The route is synchronous CPU work inside an async handler. What happens to other
+  requests while it runs? At what point would you move it to a worker thread, and how
+  would you know you had reached that point?
+- The page validates the scramble with the same schema as the server. Why is the server
+  check still needed?
+- `staleTime: Infinity` is right for the template today. What changes when a model writes
+  the text, and is the answer still "the same question always gets the same answer"?
+- The worked-example test expected "The pair already solved stay solved". What kind of
+  test locks a bug in place, and what caught it here instead?
+- `STANDARD_COLOUR_NAMES` moved from the web app into the shared contract. Argue against
+  that move, then say what would have to be true for your argument to win.
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **`source` and `unknown`.** `source` is for the client: it tells the page who wrote the
+   text, and lets a test check it. The page does not show it yet. `unknown` is for the
+   developer fixing the prompt, so it goes to the log. The refused text is exactly the
+   unchecked model output the gate exists to keep away from readers. Sending it in the
+   response, even in a field the page ignores, puts it one line of code from the screen.
+   It would also become part of the contract, and clients would start to depend on it.
+2. **Testing against itself.** Yes, for the tokens, and on purpose. The test proves the
+   route's wiring: it parses the query, applies the scramble to a solved cube, defaults
+   to `D`, passes the cross into F2L, and returns every step in order and intact. If the
+   route inverted the scramble or dropped a step, the test would fail. It does not prove
+   the solver is right, because if the solver is wrong both sides agree. That is the
+   shared suite's job, where the sticker oracle checks every step.
+3. **Synchronous work in an async handler.** Node runs JavaScript on one thread. The solve
+   has no `await` in it, so while it runs (about 4 ms, up to 40 ms, plus about 100 ms the
+   first time per face) no other request is handled, not even a health check. They wait
+   in the queue. `async` does not help, because it only yields at an `await`. The model
+   calls are network waits and do not block. The point to move the solve to a worker
+   thread is when solver load makes other routes slow. You would know by measuring:
+   `perf_hooks.monitorEventLoopDelay`, or the p99 latency of a cheap route while the
+   solver is busy. A worker pool costs a dependency or hand-written pooling, plus copying
+   the cube and the answer between threads.
+4. **Validating twice.** The page's check is for the user: instant feedback, and no
+   wasted request. The server's check is the security boundary. Anyone can call the API
+   with `curl`, an old build or an edited page, so the server cannot trust what the
+   client claims to have checked. The server's check also protects the CPU (the
+   500-character limit). Using one schema in both places means the two cannot drift
+   apart.
+5. **`staleTime` once a model writes the text.** The answer is no longer always the same.
+   The model's wording can differ between calls, after a restart (the cache is in
+   memory), between two processes, and after a prompt version change. If the model fails
+   or the cap is reached, the same step gets the template instead. The server cache makes
+   it usually the same, not always. Part 9, question 6 gives the new reason to keep
+   `Infinity`.
+6. **A test that locks a bug in place.** The expected string was copied from the code's
+   output instead of being worked out from the requirement (correct English). This kind of
+   golden-output test checks that the code does what it does, bugs included. A person
+   reading the page's real output caught it. The fix also tests the plural, so singular
+   and plural each have to be right.
+7. **`STANDARD_COLOUR_NAMES` in the contract.** Against: the contract is the wire format.
+   English colour words are presentation, which the web app should own, including
+   translation and a user's own colour scheme. Putting them in the contract couples server
+   and client, so changing a word becomes a contract change. For: the server now writes
+   sentences that name colours, so the sentences and the stickers must use one table. The
+   argument against wins if the server stops writing colour words. It also wins if names
+   have to vary per user or language: then they become data passed in (the template
+   already takes `names` as a parameter), and a shared constant is the wrong default.
+
+## Designing the explanation agent (solve coaching, part 9)
+
+The design is in [ADR-0022](architecture/0022-step-explanation-agent.md). These questions
+were written while it was Proposed, against a paid Anthropic adapter. It was accepted with
+Gemini's free tier instead (part 10). The questions still stand: read "spend" as "quota"
+where the free tier changes the meaning. Answers are added here as they are worked out.
+
+### Questions to answer out loud, without notes
+
+- The port is one method: text in, text out. What did leaving out streaming, tools and
+  structured output buy, and which future feature would force you to widen it?
+- The prompt names colours ("green") instead of passing the facts' `Face` letters. The gate
+  would catch a stray `F` anyway. Why prevent it in the prompt as well, and what would the
+  refusal rate tell you if you didn't?
+- The adapter is given the key explicitly and ignores the SDK's own credential lookup. What
+  goes wrong on a developer's laptop if it doesn't? (The Gemini adapter uses `fetch`, which
+  has no lookup at all. Which rule in §4 does that make easier to keep?)
+- The cache key is a hash of the built prompt, not the scramble. Give a case where two
+  different scrambles share an entry. What would have to change for that to be wrong?
+- Why are refused and failed replies not cached? What would caching a failure cost, and
+  what would not caching a refusal cost if the model refuses the same step every time?
+- `staleTime: Infinity` was justified by "the answer never changes". That is no longer
+  true, yet it stays. State the new justification, and the one case where it gives the
+  reader a worse answer.
+- A rate limit of 30 a minute per client does not bound spend. Explain why, and say which of
+  the three limits in §5 would stop a thousand addresses each sending 29 requests a minute.
+- Two API processes each hold their own cache and daily cap. What are the real cap and
+  hit rate then, and what is the smallest change that fixes both?
+- The gate checks notation, not meaning. Write a model reply that passes the gate and is
+  still wrong, and say how you would catch it without a second model.
+- One call per step costs more input tokens than one call per solve. Defend that choice
+  to someone who only cares about the bill.
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **A one-method port.** Every provider can implement text in and text out, and the
+   switch from Anthropic to Gemini proved it: one file. The fake is 40 lines. Streaming
+   was more than unnecessary here, it was wrong: the gate needs the whole text before
+   anyone reads it, so streamed text would reach the reader unchecked. A coaching chat
+   would force the port wider: it needs conversation history (a list of messages) and
+   probably streaming. The orchestrator agent would need tools. If the gate became an
+   allowlist that refers to tokens by index, that would need structured output. Add each
+   one as a new optional capability or a second port, and leave `generate` as it is.
+2. **Preventing face letters in the prompt as well.** The gate guarantees the letters are
+   caught. The prompt makes catching them rare. A refusal is not free: it uses a call of
+   the quota and the reader gets the template anyway. In the facts, `F` means green, but
+   in notation it means a turn. Given letters, the model would write "the F pair" all the
+   time. The refusal rate would then measure that flaw in the prompt, would hide the
+   model's real mistakes, and would fail the 5% limit. Measured with colour names, it was
+   0%. That number means something only because the prompt does not cause refusals by its
+   own design.
+3. **The key passed in explicitly.** SDKs look for credentials on their own: an
+   environment variable such as `GOOGLE_API_KEY`, or a `gcloud` login. Suppose a
+   developer has their personal key exported in their shell for another project. Then
+   CubeCoach, and its tests, would call the model on that account, which may be billed,
+   even with no key in `.env`. `fetch` reads nothing on its own, so the only key the
+   adapter can use is the one config hands it. That makes §4's rule easy to keep: no key
+   in our environment means no model.
+4. **The prompt as the cache key.** The prompt is built from the step's tokens and facts,
+   never the scramble. Take a scramble, and the same scramble followed by an A-perm. The
+   A-perm only cycles three top-layer corners and puts every edge back, so the four cross
+   edges are in the same places. The cross step's moves and facts match, so both share
+   one entry. Their F2L steps differ, because the corners moved. Sharing becomes wrong
+   once anything that shapes the reply is missing from the key. That happens if the prompt
+   gains the scramble, the user's level or earlier steps without the key changing. The
+   realistic way is quieter: the system prompt and `maxTokens` are not hashed. Only
+   `EXPLAIN_PROMPT_VERSION` stands for them, so editing the system prompt without bumping
+   the version serves old replies.
+5. **Not caching refusals and failures.** Failures (timeout, 5xx, 429) pass. Caching one
+   would make the cache remember an outage: that step would get the template until the
+   entry was evicted or the process restarted, long after the provider recovered. The cost
+   of not caching a refusal: a step the model always refuses spends one call each time it
+   is asked and still shows the template. A popular step could use up much of the 450.
+   The fix would be a short negative cache (skip that key for an hour). Its key includes
+   the prompt version, so a prompt fix gets past it. At 0% measured refusals, it is not
+   worth adding yet. The log names every refusal, so it would show up.
+6. **The new reason for `staleTime: Infinity`.** The text should not change while someone
+   is reading it. Fetching again uses quota and gives the reader nothing, because the
+   server cache usually returns the same text. The worse case: if the first request fell
+   back to the template (timeout, failure or cap), that tab keeps the template for the
+   rest of the session, even after the model recovers. The comment in
+   `apps/web/src/features/solver/use-solver-steps.ts` gave the old reason ("the answer
+   never changes") until it was updated to this one.
+7. **A per-client limit does not bound spend.** It limits each address, not their sum: a
+   thousand addresses at 29 a minute are each under 30, together 29,000 requests a
+   minute, and each new scramble is about five model calls. The global daily cap stops
+   it. After 450 calls, every request gets the template until midnight UTC. The provider
+   quota is the backstop. The attack still works in two ways. It uses up the model for
+   everyone for the rest of the day. And 29,000 solves a minute at about 4 ms each is
+   about two minutes of CPU every minute, more than one event loop has. So the route
+   itself saturates the event loop, and none of the three limits is designed to stop that.
+8. **Two processes.** Each keeps its own count, so the real cap is 2 × 450 = 900, above the
+   quota of 500. The provider's 429 becomes the real limit: still no bill, but the app no
+   longer falls back by its own rule. Each cache sees only its share of requests. A repeat
+   that lands on the other process misses, calls again and may get different wording, so
+   the hit rate drops (roughly halved with round-robin). The smallest change that fixes
+   both is to move both into the database the API already has. That means a table keyed
+   by the same hash, and a counter row for each day that is incremented with one atomic
+   `UPDATE … RETURNING`. Dividing the cap by the number of processes fixes the cap only.
+9. **Passes the gate, still wrong.** Say the tokens are `y U R U' R'` and the facts say the
+   green–red pair starts at back left, with an insert of 4 moves. Then: "The green–orange
+   pair is at front left, so y brings it round and U R U' R' inserts it in three moves."
+   Every move is in the token list, so it passes. The colour, the place and the count are
+   all wrong. To catch it without a second model, check claims the way the gate checks
+   notation. Pull out the colour words, place phrases ("front left", "top layer") and
+   numbers. Every pair named must be one the facts name, every place must be a place in
+   the facts, and every number must be one of the facts' counts. A mismatch refuses and
+   falls back to the template. This is the next step the ADR names. Its limit: it checks
+   vocabulary, not which number belongs to which claim, or whether "because" is true.
+10. **One call per step, for the bill.** On this free tier, tokens cost nothing. The quota
+    counts requests, so honestly a call per step costs five times the requests: about 90
+    solves a day instead of about 450. The defence: steps repeat across scrambles (part 9,
+    question 4) but whole solves almost never do. So the per-step cache saves calls a
+    per-solve cache never would. A refusal or failure throws away one step, not all five.
+    Calls run in parallel, so the solve's latency is the slowest step's, not the sum. On a
+    paid tier, the repeated input is the fixed system prompt, which prompt caching makes
+    cheap, and output tokens, which cost more, are the same either way.
+
+## Building the explanation agent (solve coaching, part 10)
+
+[ADR-0022](architecture/0022-step-explanation-agent.md) was accepted with one change from
+the proposal. The product owner ruled out paid calls, then ruled out a local model because
+it only works while their computer is on. That left a hosted free tier: Gemini
+Flash-Lite, with a key from a Google Cloud project that has no billing linked.
+
+### Why did changing provider touch only one file of the design?
+
+The design was written against the port, not the provider. The prompt builder, the gate,
+the cache, the cap and the logs all talk to `TextModel`, which takes text and returns text.
+The decisions that changed (the adapter, the variables, the cap) are the ones about the
+provider. Everything about explaining steps stayed the same. That is the test of a port: a
+change of vendor costs an adapter and some configuration, not a redesign.
+
+### Why `fetch` here, when the proposal justified an SDK?
+
+The SDK was justified by typed errors and tested retries for a paid API. Here the adapter
+sends one kind of request, the failures that matter are a handful of statuses and reply
+shapes, and the retry policy is deliberately narrower than any SDK's default. About 80
+lines with their own tests replace a dependency. The reason for a dependency has to be
+true for this provider, not the one in the draft.
+
+### What actually stops a bill?
+
+Not the code. The daily cap counts per process and can be wrong. The real limit is that
+the key's project has no billing account, so past the quota Google refuses the call with a
+429 and cannot charge anything. The cap sits just under that quota so the app falls back
+by its own rule, and the quota is the backstop the cap cannot get wrong. The danger is
+quiet: linking billing to that project for any other reason moves the key to a paid tier.
+
+### Why is a 429 not retried, when a 503 is?
+
+A retry makes sense when the failure might not happen twice. A 503 is a server having a
+bad moment. On a free tier a 429 usually means the quota for the minute or the day is
+spent, so asking again fails again and uses more of it. The retry also shares the step's
+one deadline, so it can never make the route slower than six seconds.
+
+### Why does the test context pass `null`, when config already says "no key, no model"?
+
+The tests load the developer's `.env`, and that file now holds a real key. If the test
+context took the model from config, every API test run would call Gemini and spend the
+day's quota. So the default is `null`, and a test that wants a model passes a fake. Only
+the opt-in live measurement uses the real key.
+
+### How does a `Map` make an LRU cache?
+
+A `Map` iterates in insertion order. Reading an entry deletes it and sets it again, which
+moves it to the end. So the first key is always the least recently used one, and evicting
+is deleting `keys().next()`. No linked list or library needed, and every operation is
+constant time.
+
+### Questions to answer out loud, without notes
+
+- The cap counts failed calls but not cache hits. Justify both halves.
+- Two identical requests arrive at the same moment, before either has filled the cache.
+  How many model calls happen? Is that worth fixing, and how would you?
+- The model id is pinned (`gemini-3.5-flash-lite`), not `gemini-flash-latest`. What does
+  pinning protect, and what does it cost you over a year?
+- The adapter drops the original network error instead of keeping it as `cause`. What
+  could that error contain, and what do you lose by dropping it?
+- A free tier can change its limits or disappear. Walk through what a user sees on the
+  solver page the day it does, and what you would change.
+- The explainer's tests use a fake model, and the route test uses the same fake. What
+  would a bug in the fake hide, and what catches the real adapter's mistakes instead?
+- The live measurement calls the adapter directly, not the explainer. Why would measuring
+  through the explainer give a misleading refusal rate?
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **Failed calls count, cache hits don't.** A failed call still reached the provider, and
+   the quota counts requests that were made, so the cap has to count them to stay in step
+   with it. Not counting failures would also mean unlimited calls during an outage, which
+   is exactly when calling again helps least. A cache hit makes no request, so counting it
+   would spend the cap on nothing. The lookup also comes before the budget check, so after
+   the cap is reached, steps already in the cache still get model text. A retry counts too:
+   the adapter retries a 5xx, and that is a second request to the quota, so the request
+   carries `mayRetry`, which the explainer answers by taking from the budget. Without it,
+   one unit of the cap could be two requests, and in a long 5xx outage 450 counted calls
+   could be up to 900. The callback keeps the retry policy in the adapter and the budget
+   in the agent, without either knowing how the other works.
+2. **Two identical requests at once.** Both miss the cache, both take from the budget, and
+   both call the model. That is ten calls for one five-step solve, possibly with different
+   wording, and the last one written wins the cache entry. This is a cache stampede. The
+   fix is single-flight: a `Map` from key to the pending promise, so the second caller
+   awaits the first call instead of making its own. It is about ten lines. The cost is one
+   more case to reason about: both callers share the first call's deadline and its
+   failure. It is worth adding if the logs show duplicate calls, for example a
+   double-submit, or a shared link opened by many people at once.
+3. **A pinned model id.** Pinning keeps the measurement true. The 0% refusal rate, the
+   latency and the cap of 450 were all measured on, or chosen for, Flash-Lite and its
+   quota of 500. If an alias moved to another model, the wording, the refusal rate and the
+   quota could change underneath, unseen. Gemini 3.8 Flash allows 20 a day, so the cap of
+   450 would be wrong. The cost over a year: pinned models are deprecated and then shut
+   down. On that day every call fails as `rejected` and every step quietly gets the
+   template. So someone has to watch for deprecation notices, re-run the live measurement
+   on the next model, and change one variable. In the meantime the pinned model misses the
+   newer one's improvements.
+4. **Dropping the original network error.** A `fetch` error usually holds a `cause` with
+   a code (`ENOTFOUND`, `ECONNRESET`, a TLS failure) and the host. The key is in a header,
+   not the URL, so it is unlikely to be in there, and the real risk is small. Dropping it
+   loses the diagnosis: DNS, a refused connection, TLS, a proxy and a body that was not
+   JSON all log the same `unavailable`. A middle ground keeps only safe fields, such as
+   `cause.code` and the error's name, and never the object whole. Logging whole error
+   objects is the habit that leaks secrets elsewhere.
+5. **The free tier changes or disappears.** If the quota is cut, calls past the new limit
+   get a 429 and fall back to the template. If the model or tier is removed, calls get a
+   4xx (`rejected`) and fall back the same way. The user sees the page work, about as fast
+   as before, with the template's plainer wording. There is no error and no bill, because
+   no billing is linked. Only a provider that hangs makes it slower, up to the 6-second
+   deadline. Nobody would notice except in the logs, which get one `warn` per failed step,
+   not one a day like the cap. What would change: lower `EXPLANATION_DAILY_CALL_CAP` to
+   the new quota, or change `EXPLANATION_MODEL`, or write one adapter for another
+   provider. The gap it exposes: something should alert on the failure rate, and
+   possibly a circuit breaker should stop calling for a while after repeated 429s.
+6. **The fake.** The explainer's tests prove the explainer works with the fake, so if the
+   fake behaves unlike the adapter, they prove the wrong thing. There was a real example.
+   The fake's `'hang'` rejected with the signal's `TimeoutError`, while the real adapter
+   turns a timeout into `TextModelError('timeout')`. So the tests logged a timeout as
+   `failure: 'unexpected'`, but production logs `failure: 'timeout'`. The fallback was
+   the same, so nothing broke, but the test was checking a log line production never
+   writes. Now the fake rejects with the adapter's error, and the port's comment says
+   every adapter must. The adapter's own mistakes are caught by `gemini-text-model.test.ts` with a
+   stubbed `fetch`: the request shape, the key in a header, each failure mapped to its
+   kind, and the retry rules. They are also caught by the opt-in live measurement against
+   the real API. The shared `TextModel` type checks shapes, not behaviour. The way to close
+   the gap is one contract test suite run against both the fake and the adapter.
+7. **Why the live measurement skips the explainer.** Through the explainer, three things
+   would bend the number. The cache would serve repeated steps without a call, counting
+   one sample as several passes, while refusals, which are not cached, would be called
+   again. The cap could end the run, and every later step would come back as the template
+   with the same `no-model` reason as a failure. A timeout or 429 also comes back as that
+   template, so failures, the cap and real answers could not be told apart. Calling the
+   adapter directly makes every step one real call, and keeps failures (1 timeout) apart
+   from refusals (0).
+
+## Checking what the model says (solve coaching, part 11)
+
+[ADR-0023](architecture/0023-explanation-fact-check.md) adds a fact check after the
+notation gate. The gate makes sure the model only names the step's own moves. The fact
+check makes sure that what it says about colours, places, counts and which moves do which
+job agrees with the facts it was given. It is plain code, with no second model, and when
+it disagrees the reader gets the template, exactly as when the gate refuses.
+
+### Why not ask a second model whether the first one was right?
+
+Because then you have two unchecked models instead of one. The judge spends the same
+free quota and adds its own delay, and it can approve a wrong claim or reject a true one
+for reasons no test can pin down. Here the truth is already sitting in the step's facts,
+built and re-checked by the engine. Comparing a claim with data you already have is
+ordinary code, and CLAUDE.md keeps deterministic work out of the AI.
+
+> "The facts were already computed. Checking a sentence against them is a lookup, not a
+> judgement, so it belongs in code that tests can hold to an exact answer."
+
+### How do you test a checker for false alarms, when you can't list every true sentence?
+
+Use a source of text that is true by construction: the template. It only restates facts,
+so every claim in it is right. The tests run the template through the check over 120
+solves on all six cross faces, about 600 steps, and require it to pass every one. Then
+they make one fact wrong in that same text (swap a colour, swap two edges' sides, put a
+pair somewhere it never was, give the join one extra move) and require the check to
+catch it. One test guards against false alarms, the other against missed errors.
+
+> "The template is a free oracle for true text. Pass it unchanged, fail it with one fact
+> mutated."
+
+### Why must a number be next to a noun before it counts as a claim?
+
+Because most numbers in English aren't counts. "This one is shortest" uses "one" as a
+pronoun. "Two of the moves are turns of the top" says nothing about how many moves there
+are. Reading every number would refuse true text all the time. So a number only counts
+when "moves", "edges", "pairs" or similar follows within two words, and the search stops
+at "of", "the", punctuation and so on. The cost is honest: "the sixth move" and "a single
+move" are not read, so a claim written that way is missed rather than refused.
+
+### Why tune on one live run and report on another?
+
+The rules were adjusted until they read the first corpus correctly: 10 alarms became 3,
+and all 3 were real. Reporting 3% from that same corpus would measure how well the rules
+were fitted to it, not how well they work. It's the same reason a model is evaluated on a
+test set it was never trained on. A second run, on a different seed, gave 7 alarms in 96
+replies, all 7 of them really wrong, plus 5 wrong replies that got through. That's the
+number that means something.
+
+### Why is "contradicted" a separate reason from "refused"?
+
+They have different causes and different fixes. A notation refusal means the prompt let
+the model invent a move. A contradiction means the model misread a fact, or the check
+misread the sentence. With one shared reason, every alarm in the log would have to be
+opened to tell which. The gate still runs first, so a reply that both invents a move and
+gets a fact wrong is reported as the stronger failure.
+
+### Why does the "both join and insert" exemption exist, and what does it cost?
+
+Replies often name the whole sequence and say it "joins the corner and edge and inserts
+the pair". That's a summary, and it's true. Checking it like a claim about the first part
+of the step would refuse good text. The first version exempted any run said to do both,
+and "R U F R F' R join them and insert" got through, with `R` written where the step has
+`R'`. The obvious fix, "a run said to do both must be the whole step", was too tight:
+"U2 sets them up, then F' U' F joins and inserts them" is true when `F'` makes the pair.
+The rule that held up on real replies is "it must run to the end of the step, starting no
+later than the joining move". A rule always trades a kind of false alarm for a kind of
+miss, and replaying saved replies is what tells you which trade you made before you spend
+quota finding out live.
+
+### The fix for a false alarm was found on the measurement run. Why not just report the fixed number?
+
+Seed 2028 was the fresh test set for the second round of rules. It found one true reply
+refused, because "with R'" was read with the "join" earlier in the sentence. The fix is
+clearly right, and replayed, 2028 then shows only real errors. But that clean number is
+fitted: the rule was changed after looking at those replies. So the ADR reports what the
+run measured (1 false refusal in 94) and calls the replayed number fitted. After that,
+production logs are the ongoing test set, and a fourth seed is only worth spending if the
+rules change again.
+
+> "Once you've tuned on a test set, it's a training set. Report the number from before
+> the fix."
+
+### Questions to answer out loud, without notes
+
+- The check reads only claims in shapes it knows. Name one true sentence it would wrongly
+  refuse, and one false sentence it would let through. Which kind of mistake is worse
+  here, and why?
+- The gate runs before the fact check. What would go wrong if the order were reversed?
+- 7 of 7 alarms were real, but in 4 the logged reason named the wrong claim. Does that
+  matter if the fallback was right anyway? Who reads that log, and what do they do with it?
+- The model made no colour, place or count mistakes in 196 replies. Should those rules
+  stay? Argue both sides.
+- `checkFacts` lives in `shared`, not the API. What would you lose by moving it next to
+  the prompt?
+- Tuning on seed 2026 and reporting on 2027 still leaves one problem if you tune again
+  after reading the 2027 replies. What is it, and how would you keep the number honest
+  over many rounds?

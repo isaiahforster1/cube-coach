@@ -50,3 +50,7 @@ reversal destroys the only thing this directory is for.
 | [0017](0017-one-origin-in-production.md)                | The API serves the web client, from one origin                  | Accepted                                                              |
 | [0018](0018-authorisation-and-identity-rules.md)        | Rules for authorisation, identity and cost                      | Accepted, amended by [0019](0019-email-verification.md)               |
 | [0019](0019-email-verification.md)                      | Email verification, proving the inbox and the password together | Accepted                                                              |
+| [0020](0020-whole-cube-rotations.md)                    | Whole-cube rotations are a separate kind of move                | Accepted                                                              |
+| [0021](0021-step-solver.md)                             | The step solver searches in a fixed frame                       | Accepted                                                              |
+| [0022](0022-step-explanation-agent.md)                  | A model rewrites the engine's facts, behind a port              | Accepted, amended by [0023](0023-explanation-fact-check.md)           |
+| [0023](0023-explanation-fact-check.md)                  | A deterministic fact check after the notation gate              | Accepted                                                              |

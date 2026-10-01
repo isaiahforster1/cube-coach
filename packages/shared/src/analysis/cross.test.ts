@@ -1,9 +1,9 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { applyMoves, createSolvedCube } from '../cube/cube.js';
-import { invertAlgorithm, parseAlgorithm } from '../cube/notation.js';
+import { applyMoves, applySequence, createSolvedCube } from '../cube/cube.js';
+import { invertAlgorithm, parseAlgorithm, parseSequence } from '../cube/notation.js';
 import { FACES, TURNS, type Face, type Move } from '../cube/types.js';
-import { crossDifficulty, crossDifficultyByFace } from './cross.js';
+import { crossDifficulty, crossDifficultyByFace, crossDistance } from './cross.js';
 import { EDGE_SLOTS, readEdges } from './edges.js';
 
 const ALL_MOVES = FACES.flatMap((face) => TURNS.map((turn) => `${face}${turn}` as Move));
@@ -117,6 +117,32 @@ describe('crossDifficulty', () => {
     // Applying the scramble then its inverse returns to solved, so the cross distance
     // after both must be zero.
     expect(crossDifficulty([...scramble, ...inverse], 'D')).toBe(0);
+  });
+});
+
+describe('crossDistance', () => {
+  /** The split must not change behaviour: the scramble form is now a thin wrapper. */
+  it('agrees with crossDifficulty on the state the scramble produces', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...ALL_MOVES), { minLength: 0, maxLength: 25 }),
+        fc.constantFrom(...FACES),
+        (scramble, face) =>
+          crossDistance(applyMoves(createSolvedCube(), scramble), face) ===
+          crossDifficulty(scramble, face),
+      ),
+      { numRuns: 60 },
+    );
+  });
+
+  /**
+   * On a rotated cube the edge reader would read slots by position and return a wrong
+   * number without complaint. Refusing is the only safe answer.
+   */
+  it('refuses a state whose centres have been rotated away from home', () => {
+    const rotated = applySequence(createSolvedCube(), parseSequence('y'));
+
+    expect(() => crossDistance(rotated, 'D')).toThrow(/centre/);
   });
 });
 

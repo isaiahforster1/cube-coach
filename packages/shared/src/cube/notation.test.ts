@@ -4,8 +4,13 @@ import {
   InvalidNotationError,
   invertAlgorithm,
   invertMove,
+  invertSequence,
+  invertToken,
   isMove,
+  isRotation,
+  isToken,
   parseAlgorithm,
+  parseSequence,
 } from './notation.js';
 
 describe('parseAlgorithm', () => {
@@ -37,8 +42,9 @@ describe('parseAlgorithm', () => {
     expect(() => parseAlgorithm('R3')).toThrow(InvalidNotationError);
   });
 
-  it('reports which token failed and where', () => {
-    expect(() => parseAlgorithm('R U Q2 F')).toThrow(/Invalid move 'Q2' at position 2/u);
+  it('reports which token failed, counting moves from one for people and zero for code', () => {
+    expect(() => parseAlgorithm('R U Q2 F')).toThrow(/Invalid move 'Q2' at move 3$/u);
+    expect(() => parseAlgorithm('R U Q2 F')).toThrow(expect.objectContaining({ index: 2 }));
   });
 });
 
@@ -85,5 +91,53 @@ describe('isMove', () => {
     expect(isMove('')).toBe(false);
     expect(isMove('M')).toBe(false);
     expect(isMove('RR')).toBe(false);
+  });
+});
+
+describe('parseSequence', () => {
+  it('accepts rotations alongside face turns', () => {
+    expect(parseSequence("y R U R' x2 z'")).toEqual(['y', 'R', 'U', "R'", 'x2', "z'"]);
+  });
+
+  it('accepts a typographic apostrophe on a rotation', () => {
+    expect(parseSequence('y’')).toEqual(["y'"]);
+  });
+
+  it('still rejects wide turns, which are also lowercase', () => {
+    expect(() => parseSequence('r U')).toThrow(InvalidNotationError);
+  });
+
+  it('rejects an uppercase rotation', () => {
+    expect(() => parseSequence('X')).toThrow(InvalidNotationError);
+  });
+});
+
+describe('parseAlgorithm and rotations', () => {
+  it('rejects a rotation, because scrambles and stored algorithms may not contain one', () => {
+    expect(() => parseAlgorithm("y R U R'")).toThrow(/Invalid move 'y' at move 1$/u);
+  });
+});
+
+describe('invertToken', () => {
+  it('inverts a rotation the same way as a face turn', () => {
+    expect(invertToken('x')).toBe("x'");
+    expect(invertToken("y'")).toBe('y');
+    expect(invertToken('z2')).toBe('z2');
+  });
+});
+
+describe('invertSequence', () => {
+  it('reverses the order as well as each token', () => {
+    expect(invertSequence(parseSequence("y R U' x2"))).toEqual(['x2', 'U', "R'", "y'"]);
+  });
+});
+
+describe('isRotation and isToken', () => {
+  it('tells rotations from face turns', () => {
+    expect(isRotation('x')).toBe(true);
+    expect(isRotation('R')).toBe(false);
+    expect(isToken('x')).toBe(true);
+    expect(isToken('R')).toBe(true);
+    expect(isToken('M')).toBe(false);
   });
 });

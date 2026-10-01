@@ -41,9 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No version here: the action reads `packageManager` from package.json, and it
+      # refuses to run when both name a version.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 12
 
       - uses: actions/setup-node@v4
         with:
