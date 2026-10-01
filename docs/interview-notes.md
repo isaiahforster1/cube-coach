@@ -2881,12 +2881,13 @@ They have not been explained back yet.
    provider. The gap it exposes: something should alert on the failure rate, and
    possibly a circuit breaker should stop calling for a while after repeated 429s.
 6. **The fake.** The explainer's tests prove the explainer works with the fake, so if the
-   fake behaves unlike the adapter, they prove the wrong thing. There is a real example
-   already. The fake's `'hang'` rejects with the signal's `TimeoutError`, while the real
-   adapter turns a timeout into `TextModelError('timeout')`. So the tests log a timeout
-   as `failure: 'unexpected'`, but production logs `failure: 'timeout'`. The fallback is
-   the same, so nothing breaks, but the test is checking a log line production never
-   writes. The adapter's own mistakes are caught by `gemini-text-model.test.ts` with a
+   fake behaves unlike the adapter, they prove the wrong thing. There was a real example.
+   The fake's `'hang'` rejected with the signal's `TimeoutError`, while the real adapter
+   turns a timeout into `TextModelError('timeout')`. So the tests logged a timeout as
+   `failure: 'unexpected'`, but production logs `failure: 'timeout'`. The fallback was
+   the same, so nothing broke, but the test was checking a log line production never
+   writes. Now the fake rejects with the adapter's error, and the port's comment says
+   every adapter must. The adapter's own mistakes are caught by `gemini-text-model.test.ts` with a
    stubbed `fetch`: the request shape, the key in a header, each failure mapped to its
    kind, and the retry rules. They are also caught by the opt-in live measurement against
    the real API. The shared `TextModel` type checks shapes, not behaviour. The way to close

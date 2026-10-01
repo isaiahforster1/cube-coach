@@ -97,11 +97,7 @@ describe('the step explainer', () => {
       () => new TextModelError('rate-limited', 'no', 429),
       { failure: 'rate-limited', status: 429 },
     ],
-    [
-      'misses the deadline',
-      () => 'hang' as const,
-      { failure: 'unexpected', errorClass: 'TimeoutError' },
-    ],
+    ['misses the deadline', () => 'hang' as const, { failure: 'timeout' }],
     [
       'throws something unexpected',
       () => new RangeError('bug'),

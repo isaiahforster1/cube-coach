@@ -1,4 +1,4 @@
-import type { TextModel, TextModelRequest } from './text-model.js';
+import { TextModelError, type TextModel, type TextModelRequest } from './text-model.js';
 
 /**
  * What the fake does for one request: return text, throw an error, or never answer, so
@@ -13,8 +13,8 @@ export interface FakeTextModel extends TextModel {
 
 /**
  * A `TextModel` for tests: no network, and the reply is chosen per request. Hanging
- * respects the abort signal the way a real adapter must, so timeouts can be tested
- * without waiting for a real one.
+ * respects the abort signal the way a real adapter must, failing with the same `timeout`
+ * error, so timeouts can be tested without waiting for a real one.
  */
 export function createFakeTextModel(
   reply: (request: TextModelRequest) => FakeReply,
@@ -30,9 +30,11 @@ export function createFakeTextModel(
       const answer = reply(request);
       if (answer === 'hang') {
         return new Promise((_, reject) => {
-          request.signal.addEventListener('abort', () => reject(request.signal.reason), {
-            once: true,
-          });
+          request.signal.addEventListener(
+            'abort',
+            () => reject(new TextModelError('timeout', 'The model did not answer in time')),
+            { once: true },
+          );
         });
       }
       return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);

@@ -15,7 +15,10 @@ export interface TextModelRequest {
   readonly system: string;
   readonly prompt: string;
   readonly maxTokens: number;
-  /** Aborted when the caller's deadline passes. An adapter must stop, retries included. */
+  /**
+   * Aborted when the caller's deadline passes. An adapter must stop, retries included, and
+   * reject with a `TextModelError` of kind `timeout`.
+   */
   readonly signal: AbortSignal;
 }
 
