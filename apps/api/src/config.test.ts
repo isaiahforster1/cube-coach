@@ -48,6 +48,15 @@ describe('loadConfig', () => {
     ).toBe(20);
   });
 
+  it('reads a blank daily cap as the default, not as zero', () => {
+    expect(
+      loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '' }).EXPLANATION_DAILY_CALL_CAP,
+    ).toBe(450);
+    expect(
+      loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '0' }).EXPLANATION_DAILY_CALL_CAP,
+    ).toBe(0);
+  });
+
   it('rejects a negative or fractional daily cap', () => {
     expect(() => loadConfig({ ...valid, EXPLANATION_DAILY_CALL_CAP: '-1' })).toThrow(
       /EXPLANATION_DAILY_CALL_CAP/u,

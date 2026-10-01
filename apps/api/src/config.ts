@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** A `.env` line like `NAME=` reads as `''`. For an optional variable that means unset. */
+const blankAsUnset = (value: unknown) => (value === '' ? undefined : value);
+
 /**
  * The environment this service needs, described as a schema.
  *
@@ -57,14 +60,17 @@ const environmentSchema = z.object({
    * The key's Google Cloud project must have no billing linked. That is what keeps the
    * free tier a hard limit instead of a bill.
    */
-  GEMINI_API_KEY: z.preprocess(
-    (value) => (value === '' ? undefined : value),
-    z.string().optional(),
-  ),
+  GEMINI_API_KEY: z.preprocess(blankAsUnset, z.string().optional()),
   /** Pinned, not a `-latest` alias, so a measurement can be repeated on the same model. */
   EXPLANATION_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
-  /** Model calls per process per UTC day. Just under the free tier's 500 a day. */
-  EXPLANATION_DAILY_CALL_CAP: z.coerce.number().int().min(0).default(450),
+  /**
+   * Model calls per process per UTC day. Just under the free tier's 500 a day. Blank means
+   * the default: coerced as it is, `''` would become a cap of 0 and turn the model off.
+   */
+  EXPLANATION_DAILY_CALL_CAP: z.preprocess(
+    blankAsUnset,
+    z.coerce.number().int().min(0).default(450),
+  ),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
