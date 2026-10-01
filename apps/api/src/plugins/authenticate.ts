@@ -6,13 +6,21 @@ import { ApiError } from './error-handler.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
-    /** Set by `requireAuth`. Undefined on routes that do not use it. */
+    /**
+     * Set by `requireAuth`, or by `identifyUser` when the session is valid. Undefined on
+     * routes that use neither.
+     */
     currentUser?: User;
   }
 
   interface FastifyInstance {
     /** Use as a route `preHandler` to require a logged-in user. */
     requireAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /**
+     * Use as a route `preHandler` on a route open to guests that behaves differently for
+     * a signed-in user. Sets `currentUser` when the session is valid and never rejects.
+     */
+    identifyUser: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -44,6 +52,16 @@ export function registerAuthentication(app: FastifyInstance, authService: AuthSe
     }
 
     request.currentUser = session.user;
+  });
+
+  // A missing, expired or revoked session is a guest here, not an error: the route works
+  // for guests, so a stale cookie must not break it.
+  app.decorate('identifyUser', async (request: FastifyRequest, _reply: FastifyReply) => {
+    const token = request.cookies[SESSION_COOKIE];
+    if (token === undefined || token === '') return;
+
+    const session = await authService.authenticate(token);
+    if (session !== null) request.currentUser = session.user;
   });
 }
 

@@ -155,7 +155,8 @@ changes. To turn it on:
 2. Put it in `apps/api/.env` as `GEMINI_API_KEY=...`, with no quotes.
 3. Check the model's free **requests per day** on AI Studio's rate limit page, and keep
    `EXPLANATION_DAILY_CALL_CAP` (default 450) just under it. `EXPLANATION_MODEL` defaults
-   to `gemini-3.5-flash-lite`, which allows 500 a day.
+   to `gemini-3.5-flash-lite`, which allows 500 a day. `EXPLANATION_CLIENT_DAILY_CALL_CAP`
+   (default 50) is how many of those one account may spend. Guests always get the template.
 
 The tests never use this key: the test context passes no model unless a test gives it a
 fake. Only the opt-in live measurement makes real calls (see [testing](testing.md)).

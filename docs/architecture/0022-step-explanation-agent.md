@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-30 (proposed 2026-09-29). Amended by [ADR-0023](0023-explanation-fact-check.md), which adds the fact check its "Honest limits" names as the next step.
+Accepted — 2026-09-30 (proposed 2026-09-29). Amended by [ADR-0023](0023-explanation-fact-check.md), which adds the fact check its "Honest limits" names as the next step, and on 2026-10-01 by a per-client daily budget that makes model explanations account-only (§5).
 
 The four open questions were answered by the product owner. The answers, and one change
 they forced, are under [Decisions on the open questions](#decisions-on-the-open-questions).
@@ -140,13 +140,15 @@ showing a refused model text defeats the purpose of refusing it.
 
 ### 4. Configuration: optional, explicit, validated at startup
 
-Three new optional variables are added to `config.ts` and `.env.example`:
+Three new optional variables are added to `config.ts` and `.env.example`, and a fourth by
+the amendment to §5:
 
-| Variable                     | Default                 | Meaning                                                  |
-| ---------------------------- | ----------------------- | -------------------------------------------------------- |
-| `GEMINI_API_KEY`             | unset                   | Unset (or empty) means template only. The feature works. |
-| `EXPLANATION_MODEL`          | `gemini-3.5-flash-lite` | Model id, so switching model needs no code change.       |
-| `EXPLANATION_DAILY_CALL_CAP` | `450`                   | Model calls allowed per process per UTC day (see §5).    |
+| Variable                            | Default                 | Meaning                                                               |
+| ----------------------------------- | ----------------------- | --------------------------------------------------------------------- |
+| `GEMINI_API_KEY`                    | unset                   | Unset (or empty) means template only. The feature works.              |
+| `EXPLANATION_MODEL`                 | `gemini-3.5-flash-lite` | Model id, so switching model needs no code change.                    |
+| `EXPLANATION_DAILY_CALL_CAP`        | `450`                   | Model calls allowed per process per UTC day (see §5).                 |
+| `EXPLANATION_CLIENT_DAILY_CALL_CAP` | `50`                    | Of those, the calls one client may spend per UTC day (§5, amendment). |
 
 The adapter receives the key from `config` explicitly and sends it in the
 `x-goog-api-key` header, never in the URL, where it would end up in proxy and access logs.
@@ -177,20 +179,61 @@ server cache means a refetch after the client's cache expires usually gets the s
 One cost is accepted: if the model failed on the first request, that tab keeps the
 template for the rest of the session.
 
-**The route's 30 a minute stays, and a second limit is added.** A limit per client does
+**The route's 30 a minute stays, and daily limits are added.** A limit per client does
 not bound the total, because many clients (or one client using many addresses) add up.
-So three limits apply:
+A global limit alone lets one client spend it all, and then every user gets the template
+until midnight UTC. So four limits apply:
 
-- **Per client:** 30 requests a minute (unchanged), which bounds CPU and abuse from one
-  source.
-- **Global:** `EXPLANATION_DAILY_CALL_CAP` model calls per process per UTC day. Once it is
+- **Requests per client:** 30 a minute (unchanged), keyed on address, which bounds CPU and
+  abuse from one source.
+- **Model calls per client:** `EXPLANATION_CLIENT_DAILY_CALL_CAP` (default 50, about ten
+  solves) per UTC day. This is ADR-0018 §6's per-user budget; see the amendment below for
+  who counts as a client. Once a client reaches it, that client gets the template until
+  midnight UTC and one `warn` is logged for that client.
+- **Model calls in total:** `EXPLANATION_DAILY_CALL_CAP` per process per UTC day. Once it is
   reached, every request gets the template until midnight UTC, and one `warn` is logged
-  when the cap is hit. Cache hits do not count toward it. Failed calls do, because the
-  provider counts them too, and so does the adapter's retry (§6), which the adapter asks
-  the agent for through the request's `mayRetry`.
+  when the cap is hit.
 - **Provider side:** the free tier's own quota (decision D). The cap sits just under it, so
   the app falls back by its own rule instead of collecting 429s, and if the cap were wrong
   the quota still stops it at no charge.
+
+Both daily caps count the same way. Cache hits do not count. Failed calls do, because the
+provider counts them too, and so does the adapter's retry (§6), which the adapter asks the
+agent for through the request's `mayRetry`. Both caps are checked before either is spent,
+so a call one of them refuses costs nothing from the other: a client loses none of its
+share on a day the global cap has already run out.
+
+#### Amendment, 2026-10-01: model explanations are for accounts, each with its own budget
+
+As first built, the global cap was the only daily limit, so one client could use up the
+whole day's calls for everyone. The per-client cap above fixes that. Because the route is
+open to guests (ADR-0012), the budget cannot key on a user id alone, so:
+
+- **Guests get the template**, and the solver otherwise unchanged. Model explanations are
+  for accounts. A guest is not served cached model text either: a cache hit is free, but
+  what a guest saw would then depend on what signed-in users happened to solve first.
+- **A verified account is its own client**, keyed on its user id, wherever it signs in
+  from. Google accounts are verified when they are created (ADR-0019).
+- **An unverified account shares the budget of its address.** Registration costs nothing
+  but a request, so a budget per unverified account would be a fresh budget per throwaway
+  registration, the same hole a forged `X-Forwarded-For` used to be. A verified email
+  costs a real inbox. The address is `request.ip`, which is reliable since the proxy trust
+  fix (ADR-0018 §5).
+- **An IPv6 address counts by its /64**, the block an ISP usually gives one connection.
+  Keyed on the full address, one connection could spend a fresh budget from each of its
+  2^64 addresses. An IPv4 address carried as IPv6 (`::ffff:1.2.3.4`) is its IPv4 address.
+
+The route identifies a signed-in user with an `identifyUser` preHandler, which sets
+`currentUser` from a valid session and never rejects: a missing or stale cookie is a guest.
+That is one session lookup per request, which the 30-a-minute limit already bounds.
+
+The per-client counts live in memory, like the global count. A client is only recorded
+when a call is spent, so there are never more clients in memory than the global cap,
+however many addresses someone rotates through. A restart resets both counts, which the
+provider's quota still bounds.
+
+Accepted trade-off: unverified accounts behind one shared IPv4 address, a school or a club
+network, share one budget. Verifying the email gives each its own.
 
 Free tiers also limit requests per minute. A solve is about five parallel calls, so a
 burst of solves can be refused with a 429 inside the daily quota. That falls back to the

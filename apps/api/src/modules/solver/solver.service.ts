@@ -7,7 +7,7 @@ import {
   type Move,
   type SolverStepsResponse,
 } from '@cube-coach/shared';
-import type { ExplainerLog, StepExplainer, StepToExplain } from './step-explainer.js';
+import type { ExplainContext, StepExplainer, StepToExplain } from './step-explainer.js';
 
 /**
  * The cross and F2L for a scramble, each step with its explanation.
@@ -19,13 +19,13 @@ import type { ExplainerLog, StepExplainer, StepToExplain } from './step-explaine
  *
  * The explanations are not. With a model configured, every step is explained at once, in
  * parallel, each within its own deadline (ADR-0022 §6). Why a model's text was refused is
- * for the log, not the client, so only the source and the text are kept.
+ * for the log, not the response, so only the source and the text are kept.
  */
 export async function solveSteps(
   scramble: readonly Move[],
   crossFace: Face,
   explainer: StepExplainer,
-  log: ExplainerLog,
+  { log, client }: Pick<ExplainContext, 'log' | 'client'>,
 ): Promise<SolverStepsResponse> {
   const start = applyMoves(createSolvedCube(), scramble);
   const cross = solveCross(start, crossFace);
@@ -45,7 +45,7 @@ export async function solveSteps(
     status: f2l.status,
     steps: await Promise.all(
       steps.map(async (step, index) => {
-        const { source, text } = await explainer.explain(step, { index, log });
+        const { source, text } = await explainer.explain(step, { index, log, client });
         return { kind: step.kind, tokens: step.tokens, explanation: { source, text } };
       }),
     ),

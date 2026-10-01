@@ -90,6 +90,15 @@ const environmentSchema = z.object({
     blankAsUnset,
     z.coerce.number().int().min(0).default(450),
   ),
+  /**
+   * Model calls any one client may spend per UTC day, out of the cap above, so one client
+   * cannot use up everyone's (ADR-0022 §5). About ten solves. At least 1: turning the model
+   * off is the global cap's job, or leaving out the key.
+   */
+  EXPLANATION_CLIENT_DAILY_CALL_CAP: z.preprocess(
+    blankAsUnset,
+    z.coerce.number().int().min(1).default(50),
+  ),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });

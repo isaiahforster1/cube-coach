@@ -3487,3 +3487,62 @@ rules change again.
 - Tuning on seed 2026 and reporting on 2027 still leaves one problem if you tune again
   after reading the 2027 replies. What is it, and how would you keep the number honest
   over many rounds?
+
+## Per-client model budget (ADR-0022 §5, amended)
+
+### Why wasn't the global daily cap enough?
+
+It bounds the total, which protects the free tier, but not who spends it. One client
+running solves could use all 450 calls before lunch, and then every user got the template
+until midnight UTC. Nothing could be charged, so the harm was availability, not cost: one
+client taking the feature away from everyone. A per-client cap under the global one fixes
+that. It is ADR-0018 §6's "per-user budget", which the explainer was built before.
+
+> "A global limit protects you. A per-client limit protects your users from each other."
+
+### What is the budget keyed on, and why not just the IP?
+
+A verified account keys on its user id; everyone else is either a guest (no model at all)
+or an unverified account keyed on its address. IP alone would put a whole school network
+in one budget, and would follow a person's phone between networks as several budgets. A
+user id is the person. But a user id alone is only as costly as an account, and an
+unverified account costs one request, so a budget per unverified account is a fresh
+budget per throwaway registration. Verification is what makes an id worth a budget.
+
+### Why does IPv6 key on the /64?
+
+An ISP usually gives one connection a whole /64, 2^64 addresses it can use freely. Keyed
+on the full address, one connection could take a fresh budget per request. The /64 is
+the usual "one subscriber" unit. An IPv4 address carried as IPv6 (`::ffff:1.2.3.4`) is
+unwrapped first, or it would count as a /64 of its own.
+
+### Why are both caps checked before either is spent?
+
+So a refusal costs nothing. If the client cap were spent first and the global cap then
+refused, a client would lose its share on a day the model was already off; spent the other
+way round, a client over its own share would still drain everyone else's. Check both,
+then spend both, is one rule that covers both orders. A retry goes through the same check.
+
+### Can an attacker grow the per-client map without limit?
+
+No. A client is only written to the map when a call is spent, and spending needs room in
+the global cap, so the map never holds more than the global cap's worth of clients. The
+"warned once" set only grows for clients already in the map. Rotating addresses costs
+the attacker nothing but buys them no memory.
+
+### Why don't guests get cached model text, when a cache hit is free?
+
+Because then what a guest saw would depend on which scrambles signed-in users happened to
+solve first: the same page would sometimes show model text and sometimes the template,
+for reasons nobody could explain. "Accounts get model explanations" is a rule a user can
+understand.
+
+### Questions to answer out loud, without notes
+
+- `identifyUser` never rejects. What would go wrong if the solver route used `requireAuth`
+  instead, and what if `identifyUser` threw on a stale cookie?
+- The counts live in process memory. What happens to them on a restart, and with two
+  instances behind a load balancer? What would you change, and what would it cost?
+- Someone verifies 20 Gmail addresses. How many budgets do they get, and what still bounds
+  the damage?
+- Why is `EXPLANATION_CLIENT_DAILY_CALL_CAP` at least 1 when the global cap may be 0?
