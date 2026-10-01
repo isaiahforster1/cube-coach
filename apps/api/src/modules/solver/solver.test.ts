@@ -8,6 +8,7 @@ import {
   solveF2L,
   type SolverStepsResponse,
 } from '@cube-coach/shared';
+import { createFakeTextModel } from '../../ai/fake-text-model.js';
 import { createTestContext, type TestContext } from '../../test/context.js';
 
 let context: TestContext;
@@ -87,6 +88,47 @@ describe('GET /solver/steps', () => {
   it('refuses an overlong scramble before solving anything', async () => {
     const response = await steps(`scramble=${encodeURIComponent('R '.repeat(300))}`);
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('GET /solver/steps with a model', () => {
+  let withModel: TestContext | undefined;
+
+  afterAll(async () => {
+    await withModel?.close();
+  });
+
+  /**
+   * ADR-0022 §3: a refused text and the reason for refusing it stay on the server. The
+   * fake writes a text the gate refuses for the cross, and a passing one for every pair.
+   */
+  it('sends the model’s text where it passes and the template where it is refused, and nothing else', async () => {
+    const REFUSED = 'Start with r M2 and the cross falls into place.';
+    const model = createFakeTextModel((request) =>
+      request.prompt.startsWith('Step: the cross')
+        ? REFUSED
+        : `Do ${/Moves, in order: (.*)\n/u.exec(request.prompt)?.[1] ?? ''} to insert the pair.`,
+    );
+    withModel = await createTestContext({ textModel: model });
+
+    const response = await withModel.app.inject({
+      method: 'GET',
+      url: `/api/v1/solver/steps?scramble=${encodeURIComponent(SCRAMBLE)}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const body: SolverStepsResponse = response.json();
+
+    expect(body.steps[0]?.explanation.source).toBe('template');
+    expect(body.steps[0]?.explanation.text).toMatch(/yellow cross/u);
+    for (const step of body.steps.slice(1)) expect(step.explanation.source).toBe('model');
+    for (const step of body.steps)
+      expect(Object.keys(step.explanation).sort()).toEqual(['source', 'text']);
+
+    expect(response.body).not.toContain(REFUSED);
+    expect(response.body).not.toContain('M2');
+    expect(response.body).not.toContain('unknown');
+    expect(response.body).not.toContain('refused');
+    expect(model.requests).toHaveLength(body.steps.length);
   });
 });
 

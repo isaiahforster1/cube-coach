@@ -137,7 +137,25 @@ with an exception for `.env.example`, so real values cannot be committed by acci
 | `NODE_ENV`          | `development`, `test` or `production` |
 | `PORT` / `HOST`     | Where the API listens                 |
 | `LOG_LEVEL`         | pino log level                        |
+| `GEMINI_API_KEY`    | Optional. The explanation model's key |
 
 They are validated at startup by `apps/api/src/config.ts`. A missing or malformed
 variable fails immediately, naming the variable, rather than surfacing later as a
 confusing error on whichever request first needed it.
+
+### The explanation model
+
+Optional ([ADR-0022](architecture/0022-step-explanation-agent.md)). Without
+`GEMINI_API_KEY` every solver step is explained by the template, and nothing else
+changes. To turn it on:
+
+1. At [aistudio.google.com](https://aistudio.google.com), create an API key in a **new**
+   Google Cloud project with no billing linked. AI Studio should show the key as **Free**.
+   A project with billing would put the key on a paid tier without saying so.
+2. Put it in `apps/api/.env` as `GEMINI_API_KEY=...`, with no quotes.
+3. Check the model's free **requests per day** on AI Studio's rate limit page, and keep
+   `EXPLANATION_DAILY_CALL_CAP` (default 450) just under it. `EXPLANATION_MODEL` defaults
+   to `gemini-3.5-flash-lite`, which allows 500 a day.
+
+The tests never use this key: the test context passes no model unless a test gives it a
+fake. Only the opt-in live measurement makes real calls (see [testing](testing.md)).

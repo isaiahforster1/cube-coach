@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
+import { createGeminiTextModel } from './ai/gemini-text-model.js';
+import type { TextModel } from './ai/text-model.js';
 import type { Config } from './config.js';
 import { registerHealthRoutes } from './modules/health/health.routes.js';
 import { createAuthRepository } from './modules/auth/auth.repository.js';
@@ -17,6 +19,7 @@ import { createSolvesRepository } from './modules/solves/solves.repository.js';
 import { registerSolveRoutes } from './modules/solves/solves.routes.js';
 import { createSolvesService } from './modules/solves/solves.service.js';
 import { registerSolverRoutes } from './modules/solver/solver.routes.js';
+import { createStepExplainer } from './modules/solver/step-explainer.js';
 import { registerStatsRoutes } from './modules/stats/stats.routes.js';
 import { createStatsService } from './modules/stats/stats.service.js';
 import { registerAuthentication } from './plugins/authenticate.js';
@@ -54,6 +57,12 @@ export interface BuildAppOptions {
    * which have no build to serve.
    */
   readonly webRoot?: string;
+  /**
+   * The model behind step explanations. Left out, it comes from config: a Gemini key
+   * means Gemini, no key means none. Tests pass `null` or a fake, so no test reaches the
+   * network, whatever key the developer's `.env` holds.
+   */
+  readonly textModel?: TextModel | null;
 }
 
 /**
@@ -70,6 +79,7 @@ export async function buildApp({
   prisma,
   rateLimit: limits,
   webRoot,
+  textModel: textModelOverride,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -138,6 +148,30 @@ export async function buildApp({
 
   const google = googleConfig === null ? null : createGoogleOAuth(googleConfig);
 
+  /**
+   * The explanation model is wired like Google sign-in: present when configured, absent
+   * otherwise, and the feature still works without it (ADR-0022 §1). The key is handed
+   * to the adapter here and nowhere else.
+   */
+  const textModel =
+    textModelOverride !== undefined
+      ? textModelOverride
+      : config.GEMINI_API_KEY === undefined
+        ? null
+        : createGeminiTextModel({ apiKey: config.GEMINI_API_KEY, model: config.EXPLANATION_MODEL });
+  if (textModel === null) {
+    app.log.info('No explanation model configured; solver steps are explained by the template');
+  } else {
+    app.log.info(
+      { model: textModel.id, dailyCallCap: config.EXPLANATION_DAILY_CALL_CAP },
+      'Explanation model configured',
+    );
+  }
+  const stepExplainer = createStepExplainer({
+    model: textModel,
+    dailyCallCap: config.EXPLANATION_DAILY_CALL_CAP,
+  });
+
   const practiceSessionsRepository = createPracticeSessionsRepository(prisma);
   const practiceSessionsService = createPracticeSessionsService(practiceSessionsRepository);
   const solvesRepository = createSolvesRepository(prisma);
@@ -166,7 +200,7 @@ export async function buildApp({
       registerPracticeSessionRoutes(instance, practiceSessionsService);
       registerSolveRoutes(instance, solvesService);
       registerStatsRoutes(instance, statsService);
-      registerSolverRoutes(instance, limits?.solverMax ?? 30);
+      registerSolverRoutes(instance, limits?.solverMax ?? 30, stepExplainer);
     },
     { prefix: '/api/v1' },
   );

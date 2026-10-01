@@ -72,18 +72,22 @@ Focus explanations on concepts that would be useful in a technical interview.
 
 ## Review and Teach-Back
 
-Nothing is merged that the developer cannot explain.
+The developer will learn how the whole application works once it is built, or earlier
+whenever they say they are ready. Teach-back is not a gate: unanswered questions do not
+block merging, and they are not suggested as a next step.
 
 At the end of each milestone:
 
 1. Summarise what was built and why it was built that way.
-2. Ask the developer to explain it back in their own words.
-3. Push on the weak points the way a technical interviewer would.
-4. If an explanation does not hold up, treat that as a teaching failure rather than a
-   developer failure. Simplify the implementation or explain it differently before moving on.
+2. Record durable questions and answers in `docs/interview-notes.md`, while the reasoning
+   is still fresh.
 
-Record durable questions and answers in `docs/interview-notes.md` as they arise, while the
-reasoning is still fresh.
+When the developer asks for teach-back:
+
+1. Ask them to explain it back in their own words.
+2. Push on the weak points the way a technical interviewer would.
+3. If an explanation does not hold up, treat that as a teaching failure rather than a
+   developer failure. Simplify the implementation or explain it differently before moving on.
 
 ## Code Quality
 

@@ -132,7 +132,7 @@ describe('the template for a pair', () => {
       'The edge is in the top layer on the back, with blue on top.',
       'The first 3 moves join the corner and edge, and the last 4 moves insert the pair.',
       'The pair already solved stays solved: green–red at front left.',
-      'This also solves the green–orange at back left pair.',
+      'This also solves the green–orange pair at back left.',
     ]);
   });
 
@@ -146,6 +146,19 @@ describe('the template for a pair', () => {
     };
     expect(lines([], [two])).toEqual([
       'The pairs already solved stay solved: green–red at front left and green–orange at back left.',
+    ]);
+  });
+
+  it('names each pair an insert solves by accident as a pair at a place', () => {
+    const two: StepFact = {
+      kind: 'also-solved',
+      slots: [
+        { colours: ['F', 'L'], held: 'back-left' },
+        { colours: ['B', 'R'], held: 'front-left' },
+      ],
+    };
+    expect(lines([], [two])).toEqual([
+      'This also solves the green–orange pair at back left and the blue–red pair at front left.',
     ]);
   });
 
@@ -295,6 +308,20 @@ describe('chooseExplanation', () => {
       reason: 'refused',
       unknown: ['U2'],
     });
+  });
+
+  it('throws the text away and says why when it contradicts a fact', () => {
+    expect(chooseExplanation(step, "R U R' inserts the pair in 4 moves.", NAMES)).toEqual({
+      source: 'template',
+      text: template,
+      reason: 'contradicted',
+      mismatches: [{ claim: 'count', said: '4 moves', allowed: ['0', '3'] }],
+    });
+  });
+
+  it('reports a text that fails both checks as refused: the gate runs first', () => {
+    const result = chooseExplanation(step, "R U2 R' inserts the pair in 4 moves.", NAMES);
+    expect(result).toMatchObject({ reason: 'refused', unknown: ['U2'] });
   });
 });
 

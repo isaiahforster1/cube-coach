@@ -20,8 +20,11 @@ export * from './algorithms/index.js';
  * `solver/`, where its tests import it directly.
  */
 export {
+  checkFacts,
   checkNotation,
   chooseExplanation,
+  factOf,
+  notationIn,
   solveCross,
   solveF2L,
   templateExplanation,
@@ -29,7 +32,10 @@ export {
   type CrossStep,
   type ExplainableStep,
   type Explanation,
+  type FactMismatch,
   type F2LResult,
   type PairStep,
+  type PieceSticker,
+  type SlotRef,
   type StepFact,
 } from './solver/index.js';

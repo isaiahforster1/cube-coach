@@ -90,6 +90,29 @@ fails one run in fifty, which is worse than no test.
 
 The timer in M6 will take a clock the same way, for the same reason.
 
+## Live measurements, opt-in
+
+Two suites make real measurements and are skipped unless asked for, because they are slow
+or use a quota:
+
+- `SOLVER_TIMING=1`: the solver's performance budget (ADR-0021).
+- `EXPLANATION_LIVE=1`: real calls to the explanation model over 20 seeded solves,
+  reporting refusals, tokens and latency (ADR-0022 §7). It needs `GEMINI_API_KEY` and
+  uses about 100 of the day's free requests. It takes several minutes, because it spaces
+  its calls out to stay under the free tier's per-minute limit:
+
+  ```bash
+  EXPLANATION_LIVE=1 pnpm --filter @cube-coach/api exec vitest run src/modules/solver/explanation-live
+  ```
+
+  It also reports how often the fact check (ADR-0023) throws a reply away, and which claim
+  failed, without failing on it. Every reply is saved to `explanation-live.json` in the
+  system temp directory, so a change to the checks can be replayed against the same
+  replies for free. `EXPLANATION_LIVE_SEED` picks other scrambles: tune the checks on one
+  seed and report on another, or the number you report measures your own tuning.
+
+Every other test uses a fake model and never reaches the network.
+
 ## Coverage
 
 High where it matters, which is the cube engine and the statistics rules, and pragmatic

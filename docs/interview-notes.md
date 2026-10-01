@@ -2590,3 +2590,414 @@ is no second copy of the state that could fall out of sync.
   test locks a bug in place, and what caught it here instead?
 - `STANDARD_COLOUR_NAMES` moved from the web app into the shared contract. Argue against
   that move, then say what would have to be true for your argument to win.
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **`source` and `unknown`.** `source` is for the client: it tells the page who wrote the
+   text, and lets a test check it. The page does not show it yet. `unknown` is for the
+   developer fixing the prompt, so it goes to the log. The refused text is exactly the
+   unchecked model output the gate exists to keep away from readers. Sending it in the
+   response, even in a field the page ignores, puts it one line of code from the screen.
+   It would also become part of the contract, and clients would start to depend on it.
+2. **Testing against itself.** Yes, for the tokens, and on purpose. The test proves the
+   route's wiring: it parses the query, applies the scramble to a solved cube, defaults
+   to `D`, passes the cross into F2L, and returns every step in order and intact. If the
+   route inverted the scramble or dropped a step, the test would fail. It does not prove
+   the solver is right, because if the solver is wrong both sides agree. That is the
+   shared suite's job, where the sticker oracle checks every step.
+3. **Synchronous work in an async handler.** Node runs JavaScript on one thread. The solve
+   has no `await` in it, so while it runs (about 4 ms, up to 40 ms, plus about 100 ms the
+   first time per face) no other request is handled, not even a health check. They wait
+   in the queue. `async` does not help, because it only yields at an `await`. The model
+   calls are network waits and do not block. The point to move the solve to a worker
+   thread is when solver load makes other routes slow. You would know by measuring:
+   `perf_hooks.monitorEventLoopDelay`, or the p99 latency of a cheap route while the
+   solver is busy. A worker pool costs a dependency or hand-written pooling, plus copying
+   the cube and the answer between threads.
+4. **Validating twice.** The page's check is for the user: instant feedback, and no
+   wasted request. The server's check is the security boundary. Anyone can call the API
+   with `curl`, an old build or an edited page, so the server cannot trust what the
+   client claims to have checked. The server's check also protects the CPU (the
+   500-character limit). Using one schema in both places means the two cannot drift
+   apart.
+5. **`staleTime` once a model writes the text.** The answer is no longer always the same.
+   The model's wording can differ between calls, after a restart (the cache is in
+   memory), between two processes, and after a prompt version change. If the model fails
+   or the cap is reached, the same step gets the template instead. The server cache makes
+   it usually the same, not always. Part 9, question 6 gives the new reason to keep
+   `Infinity`.
+6. **A test that locks a bug in place.** The expected string was copied from the code's
+   output instead of being worked out from the requirement (correct English). This kind of
+   golden-output test checks that the code does what it does, bugs included. A person
+   reading the page's real output caught it. The fix also tests the plural, so singular
+   and plural each have to be right.
+7. **`STANDARD_COLOUR_NAMES` in the contract.** Against: the contract is the wire format.
+   English colour words are presentation, which the web app should own, including
+   translation and a user's own colour scheme. Putting them in the contract couples server
+   and client, so changing a word becomes a contract change. For: the server now writes
+   sentences that name colours, so the sentences and the stickers must use one table. The
+   argument against wins if the server stops writing colour words. It also wins if names
+   have to vary per user or language: then they become data passed in (the template
+   already takes `names` as a parameter), and a shared constant is the wrong default.
+
+## Designing the explanation agent (solve coaching, part 9)
+
+The design is in [ADR-0022](architecture/0022-step-explanation-agent.md). These questions
+were written while it was Proposed, against a paid Anthropic adapter. It was accepted with
+Gemini's free tier instead (part 10). The questions still stand: read "spend" as "quota"
+where the free tier changes the meaning. Answers are added here as they are worked out.
+
+### Questions to answer out loud, without notes
+
+- The port is one method: text in, text out. What did leaving out streaming, tools and
+  structured output buy, and which future feature would force you to widen it?
+- The prompt names colours ("green") instead of passing the facts' `Face` letters. The gate
+  would catch a stray `F` anyway. Why prevent it in the prompt as well, and what would the
+  refusal rate tell you if you didn't?
+- The adapter is given the key explicitly and ignores the SDK's own credential lookup. What
+  goes wrong on a developer's laptop if it doesn't? (The Gemini adapter uses `fetch`, which
+  has no lookup at all. Which rule in §4 does that make easier to keep?)
+- The cache key is a hash of the built prompt, not the scramble. Give a case where two
+  different scrambles share an entry. What would have to change for that to be wrong?
+- Why are refused and failed replies not cached? What would caching a failure cost, and
+  what would not caching a refusal cost if the model refuses the same step every time?
+- `staleTime: Infinity` was justified by "the answer never changes". That is no longer
+  true, yet it stays. State the new justification, and the one case where it gives the
+  reader a worse answer.
+- A rate limit of 30 a minute per client does not bound spend. Explain why, and say which of
+  the three limits in §5 would stop a thousand addresses each sending 29 requests a minute.
+- Two API processes each hold their own cache and daily cap. What are the real cap and
+  hit rate then, and what is the smallest change that fixes both?
+- The gate checks notation, not meaning. Write a model reply that passes the gate and is
+  still wrong, and say how you would catch it without a second model.
+- One call per step costs more input tokens than one call per solve. Defend that choice
+  to someone who only cares about the bill.
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **A one-method port.** Every provider can implement text in and text out, and the
+   switch from Anthropic to Gemini proved it: one file. The fake is 40 lines. Streaming
+   was more than unnecessary here, it was wrong: the gate needs the whole text before
+   anyone reads it, so streamed text would reach the reader unchecked. A coaching chat
+   would force the port wider: it needs conversation history (a list of messages) and
+   probably streaming. The orchestrator agent would need tools. If the gate became an
+   allowlist that refers to tokens by index, that would need structured output. Add each
+   one as a new optional capability or a second port, and leave `generate` as it is.
+2. **Preventing face letters in the prompt as well.** The gate guarantees the letters are
+   caught. The prompt makes catching them rare. A refusal is not free: it uses a call of
+   the quota and the reader gets the template anyway. In the facts, `F` means green, but
+   in notation it means a turn. Given letters, the model would write "the F pair" all the
+   time. The refusal rate would then measure that flaw in the prompt, would hide the
+   model's real mistakes, and would fail the 5% limit. Measured with colour names, it was
+   0%. That number means something only because the prompt does not cause refusals by its
+   own design.
+3. **The key passed in explicitly.** SDKs look for credentials on their own: an
+   environment variable such as `GOOGLE_API_KEY`, or a `gcloud` login. Suppose a
+   developer has their personal key exported in their shell for another project. Then
+   CubeCoach, and its tests, would call the model on that account, which may be billed,
+   even with no key in `.env`. `fetch` reads nothing on its own, so the only key the
+   adapter can use is the one config hands it. That makes §4's rule easy to keep: no key
+   in our environment means no model.
+4. **The prompt as the cache key.** The prompt is built from the step's tokens and facts,
+   never the scramble. Take a scramble, and the same scramble followed by an A-perm. The
+   A-perm only cycles three top-layer corners and puts every edge back, so the four cross
+   edges are in the same places. The cross step's moves and facts match, so both share
+   one entry. Their F2L steps differ, because the corners moved. Sharing becomes wrong
+   once anything that shapes the reply is missing from the key. That happens if the prompt
+   gains the scramble, the user's level or earlier steps without the key changing. The
+   realistic way is quieter: the system prompt and `maxTokens` are not hashed. Only
+   `EXPLAIN_PROMPT_VERSION` stands for them, so editing the system prompt without bumping
+   the version serves old replies.
+5. **Not caching refusals and failures.** Failures (timeout, 5xx, 429) pass. Caching one
+   would make the cache remember an outage: that step would get the template until the
+   entry was evicted or the process restarted, long after the provider recovered. The cost
+   of not caching a refusal: a step the model always refuses spends one call each time it
+   is asked and still shows the template. A popular step could use up much of the 450.
+   The fix would be a short negative cache (skip that key for an hour). Its key includes
+   the prompt version, so a prompt fix gets past it. At 0% measured refusals, it is not
+   worth adding yet. The log names every refusal, so it would show up.
+6. **The new reason for `staleTime: Infinity`.** The text should not change while someone
+   is reading it. Fetching again uses quota and gives the reader nothing, because the
+   server cache usually returns the same text. The worse case: if the first request fell
+   back to the template (timeout, failure or cap), that tab keeps the template for the
+   rest of the session, even after the model recovers. The comment in
+   `apps/web/src/features/solver/use-solver-steps.ts` gave the old reason ("the answer
+   never changes") until it was updated to this one.
+7. **A per-client limit does not bound spend.** It limits each address, not their sum: a
+   thousand addresses at 29 a minute are each under 30, together 29,000 requests a
+   minute, and each new scramble is about five model calls. The global daily cap stops
+   it. After 450 calls, every request gets the template until midnight UTC. The provider
+   quota is the backstop. The attack still works in two ways. It uses up the model for
+   everyone for the rest of the day. And 29,000 solves a minute at about 4 ms each is
+   about two minutes of CPU every minute, more than one event loop has. So the route
+   itself saturates the event loop, and none of the three limits is designed to stop that.
+8. **Two processes.** Each keeps its own count, so the real cap is 2 × 450 = 900, above the
+   quota of 500. The provider's 429 becomes the real limit: still no bill, but the app no
+   longer falls back by its own rule. Each cache sees only its share of requests. A repeat
+   that lands on the other process misses, calls again and may get different wording, so
+   the hit rate drops (roughly halved with round-robin). The smallest change that fixes
+   both is to move both into the database the API already has. That means a table keyed
+   by the same hash, and a counter row for each day that is incremented with one atomic
+   `UPDATE … RETURNING`. Dividing the cap by the number of processes fixes the cap only.
+9. **Passes the gate, still wrong.** Say the tokens are `y U R U' R'` and the facts say the
+   green–red pair starts at back left, with an insert of 4 moves. Then: "The green–orange
+   pair is at front left, so y brings it round and U R U' R' inserts it in three moves."
+   Every move is in the token list, so it passes. The colour, the place and the count are
+   all wrong. To catch it without a second model, check claims the way the gate checks
+   notation. Pull out the colour words, place phrases ("front left", "top layer") and
+   numbers. Every pair named must be one the facts name, every place must be a place in
+   the facts, and every number must be one of the facts' counts. A mismatch refuses and
+   falls back to the template. This is the next step the ADR names. Its limit: it checks
+   vocabulary, not which number belongs to which claim, or whether "because" is true.
+10. **One call per step, for the bill.** On this free tier, tokens cost nothing. The quota
+    counts requests, so honestly a call per step costs five times the requests: about 90
+    solves a day instead of about 450. The defence: steps repeat across scrambles (part 9,
+    question 4) but whole solves almost never do. So the per-step cache saves calls a
+    per-solve cache never would. A refusal or failure throws away one step, not all five.
+    Calls run in parallel, so the solve's latency is the slowest step's, not the sum. On a
+    paid tier, the repeated input is the fixed system prompt, which prompt caching makes
+    cheap, and output tokens, which cost more, are the same either way.
+
+## Building the explanation agent (solve coaching, part 10)
+
+[ADR-0022](architecture/0022-step-explanation-agent.md) was accepted with one change from
+the proposal. The product owner ruled out paid calls, then ruled out a local model because
+it only works while their computer is on. That left a hosted free tier: Gemini
+Flash-Lite, with a key from a Google Cloud project that has no billing linked.
+
+### Why did changing provider touch only one file of the design?
+
+The design was written against the port, not the provider. The prompt builder, the gate,
+the cache, the cap and the logs all talk to `TextModel`, which takes text and returns text.
+The decisions that changed (the adapter, the variables, the cap) are the ones about the
+provider. Everything about explaining steps stayed the same. That is the test of a port: a
+change of vendor costs an adapter and some configuration, not a redesign.
+
+### Why `fetch` here, when the proposal justified an SDK?
+
+The SDK was justified by typed errors and tested retries for a paid API. Here the adapter
+sends one kind of request, the failures that matter are a handful of statuses and reply
+shapes, and the retry policy is deliberately narrower than any SDK's default. About 80
+lines with their own tests replace a dependency. The reason for a dependency has to be
+true for this provider, not the one in the draft.
+
+### What actually stops a bill?
+
+Not the code. The daily cap counts per process and can be wrong. The real limit is that
+the key's project has no billing account, so past the quota Google refuses the call with a
+429 and cannot charge anything. The cap sits just under that quota so the app falls back
+by its own rule, and the quota is the backstop the cap cannot get wrong. The danger is
+quiet: linking billing to that project for any other reason moves the key to a paid tier.
+
+### Why is a 429 not retried, when a 503 is?
+
+A retry makes sense when the failure might not happen twice. A 503 is a server having a
+bad moment. On a free tier a 429 usually means the quota for the minute or the day is
+spent, so asking again fails again and uses more of it. The retry also shares the step's
+one deadline, so it can never make the route slower than six seconds.
+
+### Why does the test context pass `null`, when config already says "no key, no model"?
+
+The tests load the developer's `.env`, and that file now holds a real key. If the test
+context took the model from config, every API test run would call Gemini and spend the
+day's quota. So the default is `null`, and a test that wants a model passes a fake. Only
+the opt-in live measurement uses the real key.
+
+### How does a `Map` make an LRU cache?
+
+A `Map` iterates in insertion order. Reading an entry deletes it and sets it again, which
+moves it to the end. So the first key is always the least recently used one, and evicting
+is deleting `keys().next()`. No linked list or library needed, and every operation is
+constant time.
+
+### Questions to answer out loud, without notes
+
+- The cap counts failed calls but not cache hits. Justify both halves.
+- Two identical requests arrive at the same moment, before either has filled the cache.
+  How many model calls happen? Is that worth fixing, and how would you?
+- The model id is pinned (`gemini-3.5-flash-lite`), not `gemini-flash-latest`. What does
+  pinning protect, and what does it cost you over a year?
+- The adapter drops the original network error instead of keeping it as `cause`. What
+  could that error contain, and what do you lose by dropping it?
+- A free tier can change its limits or disappear. Walk through what a user sees on the
+  solver page the day it does, and what you would change.
+- The explainer's tests use a fake model, and the route test uses the same fake. What
+  would a bug in the fake hide, and what catches the real adapter's mistakes instead?
+- The live measurement calls the adapter directly, not the explainer. Why would measuring
+  through the explainer give a misleading refusal rate?
+
+#### Drafted answers
+
+Claude wrote these on 2026-09-30 at the developer's request, for the developer to review.
+They have not been explained back yet.
+
+1. **Failed calls count, cache hits don't.** A failed call still reached the provider, and
+   the quota counts requests that were made, so the cap has to count them to stay in step
+   with it. Not counting failures would also mean unlimited calls during an outage, which
+   is exactly when calling again helps least. A cache hit makes no request, so counting it
+   would spend the cap on nothing. The lookup also comes before the budget check, so after
+   the cap is reached, steps already in the cache still get model text. A retry counts too:
+   the adapter retries a 5xx, and that is a second request to the quota, so the request
+   carries `mayRetry`, which the explainer answers by taking from the budget. Without it,
+   one unit of the cap could be two requests, and in a long 5xx outage 450 counted calls
+   could be up to 900. The callback keeps the retry policy in the adapter and the budget
+   in the agent, without either knowing how the other works.
+2. **Two identical requests at once.** Both miss the cache, both take from the budget, and
+   both call the model. That is ten calls for one five-step solve, possibly with different
+   wording, and the last one written wins the cache entry. This is a cache stampede. The
+   fix is single-flight: a `Map` from key to the pending promise, so the second caller
+   awaits the first call instead of making its own. It is about ten lines. The cost is one
+   more case to reason about: both callers share the first call's deadline and its
+   failure. It is worth adding if the logs show duplicate calls, for example a
+   double-submit, or a shared link opened by many people at once.
+3. **A pinned model id.** Pinning keeps the measurement true. The 0% refusal rate, the
+   latency and the cap of 450 were all measured on, or chosen for, Flash-Lite and its
+   quota of 500. If an alias moved to another model, the wording, the refusal rate and the
+   quota could change underneath, unseen. Gemini 3.8 Flash allows 20 a day, so the cap of
+   450 would be wrong. The cost over a year: pinned models are deprecated and then shut
+   down. On that day every call fails as `rejected` and every step quietly gets the
+   template. So someone has to watch for deprecation notices, re-run the live measurement
+   on the next model, and change one variable. In the meantime the pinned model misses the
+   newer one's improvements.
+4. **Dropping the original network error.** A `fetch` error usually holds a `cause` with
+   a code (`ENOTFOUND`, `ECONNRESET`, a TLS failure) and the host. The key is in a header,
+   not the URL, so it is unlikely to be in there, and the real risk is small. Dropping it
+   loses the diagnosis: DNS, a refused connection, TLS, a proxy and a body that was not
+   JSON all log the same `unavailable`. A middle ground keeps only safe fields, such as
+   `cause.code` and the error's name, and never the object whole. Logging whole error
+   objects is the habit that leaks secrets elsewhere.
+5. **The free tier changes or disappears.** If the quota is cut, calls past the new limit
+   get a 429 and fall back to the template. If the model or tier is removed, calls get a
+   4xx (`rejected`) and fall back the same way. The user sees the page work, about as fast
+   as before, with the template's plainer wording. There is no error and no bill, because
+   no billing is linked. Only a provider that hangs makes it slower, up to the 6-second
+   deadline. Nobody would notice except in the logs, which get one `warn` per failed step,
+   not one a day like the cap. What would change: lower `EXPLANATION_DAILY_CALL_CAP` to
+   the new quota, or change `EXPLANATION_MODEL`, or write one adapter for another
+   provider. The gap it exposes: something should alert on the failure rate, and
+   possibly a circuit breaker should stop calling for a while after repeated 429s.
+6. **The fake.** The explainer's tests prove the explainer works with the fake, so if the
+   fake behaves unlike the adapter, they prove the wrong thing. There was a real example.
+   The fake's `'hang'` rejected with the signal's `TimeoutError`, while the real adapter
+   turns a timeout into `TextModelError('timeout')`. So the tests logged a timeout as
+   `failure: 'unexpected'`, but production logs `failure: 'timeout'`. The fallback was
+   the same, so nothing broke, but the test was checking a log line production never
+   writes. Now the fake rejects with the adapter's error, and the port's comment says
+   every adapter must. The adapter's own mistakes are caught by `gemini-text-model.test.ts` with a
+   stubbed `fetch`: the request shape, the key in a header, each failure mapped to its
+   kind, and the retry rules. They are also caught by the opt-in live measurement against
+   the real API. The shared `TextModel` type checks shapes, not behaviour. The way to close
+   the gap is one contract test suite run against both the fake and the adapter.
+7. **Why the live measurement skips the explainer.** Through the explainer, three things
+   would bend the number. The cache would serve repeated steps without a call, counting
+   one sample as several passes, while refusals, which are not cached, would be called
+   again. The cap could end the run, and every later step would come back as the template
+   with the same `no-model` reason as a failure. A timeout or 429 also comes back as that
+   template, so failures, the cap and real answers could not be told apart. Calling the
+   adapter directly makes every step one real call, and keeps failures (1 timeout) apart
+   from refusals (0).
+
+## Checking what the model says (solve coaching, part 11)
+
+[ADR-0023](architecture/0023-explanation-fact-check.md) adds a fact check after the
+notation gate. The gate makes sure the model only names the step's own moves. The fact
+check makes sure that what it says about colours, places, counts and which moves do which
+job agrees with the facts it was given. It is plain code, with no second model, and when
+it disagrees the reader gets the template, exactly as when the gate refuses.
+
+### Why not ask a second model whether the first one was right?
+
+Because then you have two unchecked models instead of one. The judge spends the same
+free quota and adds its own delay, and it can approve a wrong claim or reject a true one
+for reasons no test can pin down. Here the truth is already sitting in the step's facts,
+built and re-checked by the engine. Comparing a claim with data you already have is
+ordinary code, and CLAUDE.md keeps deterministic work out of the AI.
+
+> "The facts were already computed. Checking a sentence against them is a lookup, not a
+> judgement, so it belongs in code that tests can hold to an exact answer."
+
+### How do you test a checker for false alarms, when you can't list every true sentence?
+
+Use a source of text that is true by construction: the template. It only restates facts,
+so every claim in it is right. The tests run the template through the check over 120
+solves on all six cross faces, about 600 steps, and require it to pass every one. Then
+they make one fact wrong in that same text (swap a colour, swap two edges' sides, put a
+pair somewhere it never was, give the join one extra move) and require the check to
+catch it. One test guards against false alarms, the other against missed errors.
+
+> "The template is a free oracle for true text. Pass it unchanged, fail it with one fact
+> mutated."
+
+### Why must a number be next to a noun before it counts as a claim?
+
+Because most numbers in English aren't counts. "This one is shortest" uses "one" as a
+pronoun. "Two of the moves are turns of the top" says nothing about how many moves there
+are. Reading every number would refuse true text all the time. So a number only counts
+when "moves", "edges", "pairs" or similar follows within two words, and the search stops
+at "of", "the", punctuation and so on. The cost is honest: "the sixth move" and "a single
+move" are not read, so a claim written that way is missed rather than refused.
+
+### Why tune on one live run and report on another?
+
+The rules were adjusted until they read the first corpus correctly: 10 alarms became 3,
+and all 3 were real. Reporting 3% from that same corpus would measure how well the rules
+were fitted to it, not how well they work. It's the same reason a model is evaluated on a
+test set it was never trained on. A second run, on a different seed, gave 7 alarms in 96
+replies, all 7 of them really wrong, plus 5 wrong replies that got through. That's the
+number that means something.
+
+### Why is "contradicted" a separate reason from "refused"?
+
+They have different causes and different fixes. A notation refusal means the prompt let
+the model invent a move. A contradiction means the model misread a fact, or the check
+misread the sentence. With one shared reason, every alarm in the log would have to be
+opened to tell which. The gate still runs first, so a reply that both invents a move and
+gets a fact wrong is reported as the stronger failure.
+
+### Why does the "both join and insert" exemption exist, and what does it cost?
+
+Replies often name the whole sequence and say it "joins the corner and edge and inserts
+the pair". That's a summary, and it's true. Checking it like a claim about the first part
+of the step would refuse good text. The first version exempted any run said to do both,
+and "R U F R F' R join them and insert" got through, with `R` written where the step has
+`R'`. The obvious fix, "a run said to do both must be the whole step", was too tight:
+"U2 sets them up, then F' U' F joins and inserts them" is true when `F'` makes the pair.
+The rule that held up on real replies is "it must run to the end of the step, starting no
+later than the joining move". A rule always trades a kind of false alarm for a kind of
+miss, and replaying saved replies is what tells you which trade you made before you spend
+quota finding out live.
+
+### The fix for a false alarm was found on the measurement run. Why not just report the fixed number?
+
+Seed 2028 was the fresh test set for the second round of rules. It found one true reply
+refused, because "with R'" was read with the "join" earlier in the sentence. The fix is
+clearly right, and replayed, 2028 then shows only real errors. But that clean number is
+fitted: the rule was changed after looking at those replies. So the ADR reports what the
+run measured (1 false refusal in 94) and calls the replayed number fitted. After that,
+production logs are the ongoing test set, and a fourth seed is only worth spending if the
+rules change again.
+
+> "Once you've tuned on a test set, it's a training set. Report the number from before
+> the fix."
+
+### Questions to answer out loud, without notes
+
+- The check reads only claims in shapes it knows. Name one true sentence it would wrongly
+  refuse, and one false sentence it would let through. Which kind of mistake is worse
+  here, and why?
+- The gate runs before the fact check. What would go wrong if the order were reversed?
+- 7 of 7 alarms were real, but in 4 the logged reason named the wrong claim. Does that
+  matter if the fallback was right anyway? Who reads that log, and what do they do with it?
+- The model made no colour, place or count mistakes in 196 replies. Should those rules
+  stay? Argue both sides.
+- `checkFacts` lives in `shared`, not the API. What would you lose by moving it next to
+  the prompt?
+- Tuning on seed 2026 and reporting on 2027 still leaves one problem if you tune again
+  after reading the 2027 replies. What is it, and how would you keep the number honest
+  over many rounds?
